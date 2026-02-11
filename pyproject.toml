@@ -1,0 +1,14 @@
+[project]
+name = "lynx-sdk"
+version = "00.01.01"
+description = "Lynx gives your sensors personality."
+authors = [{name = "Kenny Kim", email = "wave@kenneth.kim"}]
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+dependencies = [
+    "jsonschema",
+    "orjson",
+    "paho-mqtt",
+    "pytest-sugar"
+]

@@ -1,0 +1,138 @@
+"""
+This module provides a general client for Lynx.
+
+It is based on the Mosquitto client library and provides a general 
+ client for Lynx.
+"""
+
+
+
+# === IMPORTS ===
+
+# -stdlib Imports-
+from logging import Logger, getLogger
+from typing import Callable, Optional, Any, Dict
+from enum import Enum
+from dataclasses import dataclass
+
+# -Lynx Imports-
+from lynx_sdk.utils.json_tools import validate_json_object
+
+# -External Imports-
+import paho.mqtt.client as mqtt
+import orjson
+
+
+
+# === CONSTANTS ===
+
+
+
+# === GLOBALS VARIABLES ===
+
+
+
+# === FUNCTIONS ===
+
+
+
+#  === CLASSES ===
+
+class LynxEndpointDirection(Enum):
+    SUB = "sub",
+    PUB = "pub",
+    PUBSUB = "pubsub"
+
+
+@dataclass
+class Endpoint():
+    def __init__(self, 
+        topic: str,
+        handler: Callable,
+        endpoint_direction: LynxEndpointDirection,
+        description: str = "",
+        payload_schema: Optional[object] = None,
+        allow_run_while_busy: bool = True):
+        """
+        Initialize a Lynx Endpoint object.
+
+        Args:
+            topic (str): The topic path of the endpoint. e.g. "?/Time"
+            description (str): The description of the endpoint. 
+                e.g. "The client is asked for the current time according to its clock"
+            handler (Callable): The handler function for the endpoint.
+            endpoint_direction (LynxEndpointDirection): The direction of the endpoint. 
+                e.g. LynxEndpointDirection.SUB
+            payload_schema (object): The schema for the payload of the endpoint. If the endpoint_direction is 
+                LynxEndpointDirection.PUB, the payload is what is sent from the endpoint. If the endpoint_direction is 
+                LynxEndpointDirection.SUB, the payload is what is received at the endpoint. 
+                e.g. {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "time": {
+                            "type": "string"
+                        }
+                    }
+                }
+        """
+        self.logger: Logger = getLogger(__name__)
+        self.topic: str = topic
+        self.handler: Callable = handler
+        self.endpoint_direction: LynxEndpointDirection = endpoint_direction
+        self.description: str = description,
+        self.payload_schema: object = payload_schema
+
+
+    def callback(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
+        """
+        Handle an incoming MQTT message by parsing JSON bytes and calling the handler.
+        
+        This method:
+        1. Parses the MQTT payload bytes as JSON
+        2. Validates the payload against the schema (if one exists)
+        3. Calls the handler function with the parsed dictionary
+        4. Handles errors gracefully with logging
+        
+        Args:
+            payload (bytes): The raw MQTT message payload as bytes
+            
+        Returns:
+            Optional[Any]: The return value from the handler, or None if an error occurred
+            
+        Raises:
+            ValueError: If the payload cannot be parsed as JSON
+            ValueError: If the payload fails schema validation (when schema exists)
+        """
+        self.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
+        
+        # Parse JSON bytes to dictionary
+        try:
+            payload_dict: Dict = orjson.loads(message.payload)
+        except orjson.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
+            raise ValueError(f"Invalid JSON payload: {e}") from e
+        
+        # Validate payload against schema if schema exists
+        if self.payload_schema is not None:
+            self.validate_payload(payload_dict)
+
+        # Call the handler with the parsed dictionary
+        try:
+            return self.handler(payload_dict)
+        except Exception as e:
+            self.logger.exception(
+                f"Handler exception for endpoint '{self.topic}': "
+                f"{type(e).__name__}: {str(e)}"
+            )
+            raise
+    
+
+    def validate_payload(self, payload_dict: Dict) -> None:
+        """
+        Validate a payload dictionary against a JSON schema.
+        """
+        if not validate_json_object(payload_dict, self.payload_schema):
+            error_msg = f"Payload validation failed for endpoint '{self.topic}'"
+            self.logger.warning(f"{error_msg}. Payload: {payload_dict}")
+            raise ValueError(error_msg)
