@@ -22,6 +22,9 @@ def sample_cpu_load():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
+    # import json
+    # import pprint
+    # print(json.dumps(service.produce_about(), indent=2))
     service.start()
 
 

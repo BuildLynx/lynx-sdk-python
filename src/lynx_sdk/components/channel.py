@@ -7,9 +7,9 @@ DESCRIPTION
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import Callable, Dict, List, Any
+from __future__ import annotations
+from typing import Callable, Dict, List, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 import itertools
@@ -18,7 +18,8 @@ import itertools
 from lynx_sdk.models.endpoint import Endpoint,SubEndpoint, PubEndpoint
 from lynx_sdk.singletons.time_source import TimeSource
 from lynx_sdk.utils.structures import LYNX_VERSION
-from lynx_sdk.models.endpoint import LynxEndpointDirection
+if TYPE_CHECKING:
+    from lynx_sdk.components.service import Service
 
 # -External Imports-
 import paho.mqtt.client as mqtt
@@ -26,7 +27,7 @@ import paho.mqtt.client as mqtt
 
 # === CONSTANTS ===
 
-POLL_PAYLOAD_SCHEMA = {
+COMMAND_POLL_PAYLOAD_SCHEMA = {
     "numSamples": {
         "title": "Number of Samples",
         "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
@@ -49,7 +50,7 @@ POLL_PAYLOAD_SCHEMA = {
     }
 }
 
-STREAM_PAYLOAD_SCHEMA = {
+COMMAND_STREAM_PAYLOAD_SCHEMA = {
     "numSamples": {
         "title": "Number of Samples",
         "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
@@ -65,6 +66,25 @@ STREAM_PAYLOAD_SCHEMA = {
     }
 }
 
+OUTPUT_DATA_PAYLOAD_SCHEMA = {
+    "sec": {
+        "title": "Seconds",
+        "description": "Seconds since the start of the channel",
+        "type": "integer"
+    },
+    "nsec": {
+        "title": "Nanoseconds",
+        "description": "Nanoseconds since the start of the channel",
+        "type": "integer"
+    },
+    "data": {
+        "title": "Data",
+        "description": "The data from the channel",
+        "type": "object",
+        "properties": {}
+    }
+}
+
 
 
 # === GLOBALS VARIABLES ===
@@ -72,6 +92,17 @@ STREAM_PAYLOAD_SCHEMA = {
 
 
 # === FUNCTIONS ===
+
+def generate_full_data_schema(output_data_schema: Optional[Dict]=None) -> Optional[Dict]:
+    """
+    Generate a full data schema for the channel.
+    """
+    if output_data_schema is None:
+        return None
+    else:
+        full_output_data_schema = OUTPUT_DATA_PAYLOAD_SCHEMA
+        full_output_data_schema["data"]["properties"] = output_data_schema
+        return full_output_data_schema
 
 
 
@@ -81,7 +112,7 @@ STREAM_PAYLOAD_SCHEMA = {
 class Channel():
     def __init__(self,
         id: str,
-        client: mqtt.Client,
+        service: Service,
         title: str = "",
         description: str = "",
         poll_function: Callable = None,
@@ -95,40 +126,40 @@ class Channel():
         self.id: str = id
         self.title: str = title
         self.description: str = description
-        self.client: mqtt.Client = client
-        self.poll_function: Callable = poll_function
-        self.start_stream_function: Callable = start_stream_function
-        self.data_schema: Dict = output_data_schema
+        self.service: Service = service
+        self.poll_function: Optional[Callable] = poll_function
+        self.start_stream_function: Optional[Callable] = start_stream_function
+        self.data_schema: Optional[Dict] = generate_full_data_schema(output_data_schema)
         self.lynx_version: str = lynx_version
-        self.time_source: TimeSource = time_source
+        self.time_source: Optional[TimeSource] = time_source
 
         # -Endpoints-
         self.endpoints: Dict[str, Endpoint] = {}
 
         if isinstance(poll_function, Callable):
             self.endpoints["!/Poll"] = SubEndpoint(
-                topic=f"!/Poll",
+                topic=f"{self.service.id}/{self.id}/!/Poll",
                 handler=self.poll_handler,
                 description="Poll the channel for data.",
-                payload_schema=POLL_PAYLOAD_SCHEMA)
+                payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
 
         if isinstance(start_stream_function, Callable):
             self.endpoints["!/Stream"] = SubEndpoint(
-                topic=f"!/Stream",
+                topic=f"{self.service.id}/{self.id}/!/Stream",
                 handler=self.stream_handler,
                 description="Poll the channel for data.",
-                payload_schema=POLL_PAYLOAD_SCHEMA)
+                payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
             self.endpoints["!/Stop"] = SubEndpoint(
-                topic=f"!/Stop",
+                topic=f"{self.service.id}/{self.id}/!/Stop",
                 handler=self.stop,
                 description="Stop the channel.",
                 payload_schema={})
 
         if self.data_schema is not None:
             self.endpoints["<"] = PubEndpoint(
-                topic=f"<",
+                topic=f"{self.service.id}/{self.id}/<",
                 description="Output data",
                 payload_schema=self.data_schema)
 
@@ -192,7 +223,7 @@ class Channel():
         # for data in data_list:
         #     self.output_data_schema.validate(data)
         #     self.output_data_schema.publish(data)
-        self.endpoints["<"].publish(data_list, self.client)
+        self.service.publish_using_endpoint(self.endpoints["<"], data_list)
 
 
     def stream_handler(self, message: mqtt.MQTTMessage):
@@ -222,10 +253,18 @@ class Channel():
         Produce a dictionary of information about the channel.
         """
         return {
-            self.id:{
+            "type": "channel",
+            "docs": {
                 "title": self.title,
                 "description": self.description,
-            }
+                "lynx_version": self.lynx_version,
+                "time_source": self.time_source.time_source_type.value,
+            },
+            "config": {},
+            "status": {},
+            "endpoints": {
+                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
+            },
         }
 # === MAIN LOOP ===
 

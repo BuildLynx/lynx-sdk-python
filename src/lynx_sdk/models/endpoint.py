@@ -39,8 +39,8 @@ import orjson
 #  === CLASSES ===
 
 class LynxEndpointDirection(Enum):
-    SUB = "sub",
-    PUB = "pub",
+    SUB = "sub"
+    PUB = "pub"
     PUBSUB = "pubsub"
 
 
@@ -49,14 +49,14 @@ class Endpoint():
     def __init__(self, 
         topic: str,
         endpoint_direction: LynxEndpointDirection,
+        payload_schema: object,
         description: str = "",
-        payload_schema: Optional[object] = None,
         logger: Optional[Logger] = None):
         """
         Initialize a Lynx Endpoint object.
 
         Args:
-            topic (str): The topic path of the endpoint. e.g. "?/Time"
+            topic (str): The full topic path of the endpoint. e.g. "Service/Channel/?/About"
             description (str): The description of the endpoint. 
                 e.g. "The client is asked for the current time according to its clock"
             handler (Callable): The handler function for the endpoint.
@@ -77,7 +77,7 @@ class Endpoint():
         """
         self.topic: str = topic
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
-        self.description: str = description,
+        self.description: str = description
         self.payload_schema: object = payload_schema
         self.logger: Logger = logger or getLogger(__name__)
 
@@ -91,17 +91,21 @@ class Endpoint():
             self.logger.warning(f"{error_msg}. Payload: {payload_dict}")
             raise ValueError(error_msg)
     
-    
+
     def produce_about(self) -> Dict:
         """
         Produce a dictionary of information about the endpoint.
         """
-        return {
-            self.topic:{
-                "description": self.description,
-                "payload_schema": self.payload_schema
-            }
+        about_dict = {
+            "endpoint_direction": self.endpoint_direction.value,
         }
+        
+        if self.description is not None:
+            about_dict["description"] = self.description
+        
+        about_dict["payload_schema"] = self.payload_schema
+
+        return about_dict
 
 
 @dataclass
@@ -109,14 +113,14 @@ class SubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
         handler: Callable,
+        payload_schema: object,
         description: str = "",
-        payload_schema: Optional[object] = None,
         allow_run_while_busy: bool = True,
         logger: Optional[Logger] = None):
         """
         Initialize a Lynx Subscribe Endpoint object.
         """
-        super().__init__(topic, LynxEndpointDirection.SUB, description, payload_schema, logger)
+        super().__init__(topic, LynxEndpointDirection.SUB, payload_schema, description, logger)
         self.handler: Callable = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
 
@@ -155,7 +159,7 @@ class SubEndpoint(Endpoint):
             raise ValueError(f"Invalid JSON payload: {e}") from e
         
         # Validate payload against schema if schema exists
-        if self.payload_schema is not None:
+        if self.payload_schema is not None and len(payload_dict) > 0:
             self.validate_payload(payload_dict)
 
         # Call the handler with the parsed dictionary
@@ -172,28 +176,14 @@ class SubEndpoint(Endpoint):
 class PubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
+        payload_schema: object,
         description: str = "",
         default_qos: int = 0,
         default_retain: bool = False,
-        payload_schema: Optional[object] = None,
         logger: Optional[Logger] = None):
         """
         Initialize a Lynx Subscribe Endpoint object.
         """
-        super().__init__(topic, LynxEndpointDirection.PUB, description, payload_schema, logger)
+        super().__init__(topic, LynxEndpointDirection.PUB, payload_schema, description, logger)
         self.default_qos: int = default_qos
         self.default_retain: bool = default_retain
-
-
-    def publish(self, 
-        payload: Dict, 
-        client: mqtt.Client,
-        qos: int = None,
-        retain: bool = None) -> None:
-        """
-        Publish a payload using the endpoint topic.
-        """
-        # TODO: add validation of payload
-        qos = qos or self.default_qos
-        retain = retain or self.default_retain
-        client.publish(self.topic, orjson.dumps(payload), qos=qos, retain=retain)

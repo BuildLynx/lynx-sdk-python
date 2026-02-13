@@ -7,7 +7,7 @@ Service
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import List, Dict, Callable, Any
+from typing import List, Dict, Callable, Any, Optional
 from dataclasses import dataclass
 from logging import Logger, getLogger
 import time
@@ -16,10 +16,11 @@ import time
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
-from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint
+from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint, PubEndpoint
 
 # -External Imports-
 import paho.mqtt.client as mqtt
+import orjson
 
 
 # === CONSTANTS ===
@@ -59,9 +60,13 @@ class Service():
         # -Endpoints-
         self.endpoints: Dict[str, Endpoint] = {
             "?/About": SubEndpoint(
-                topic="?/About",
-                handler=lambda args: print("About:", args),
-                description="Get information about the service.",
+                topic=f"{self.id}/?/About",
+                handler=lambda args: self.publish_using_endpoint(self.endpoints["@/About"], self.produce_about()),
+                description="Get information about the Service.",
+                payload_schema={}),
+            "@/About": PubEndpoint(
+                topic=f"{self.id}/@/About",
+                description="Emit information about the Service.",
                 payload_schema={}),
         }
         # -Channels-
@@ -117,7 +122,7 @@ class Service():
         def decorator(poll_function: Callable):
             new_channel = Channel(
                 id=id,
-                client=self.client,
+                service=self,
                 title=title,
                 description=description,
                 poll_function=poll_function,
@@ -147,7 +152,7 @@ class Service():
         def decorator(start_stream_function: Callable):
             new_channel = Channel(
                 id=id,
-                client=self.client,
+                service=self,
                 title=title,
                 description=description,
                 poll_function=None,
@@ -174,34 +179,66 @@ class Service():
         print(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
     
 
-    def on_connect(self, client: mqtt.Client, userdata: Any, flags: Dict, rc: int):
+    def on_connect(self, client:mqtt.Client, userdata:Any, flags:Dict, rc:int):
         """
         Callback for when the client connects to the MQTT broker.
         """
         self.logger.info(f"Connected to MQTT broker with result code {rc}")
         self.client.subscribe(f"{self.id}/#")
+    
+
+    def publish_using_endpoint(self, endpoint:Endpoint, payload:Dict, qos:Optional[int]=None, retain:Optional[bool]=None):
+        """
+        Publish a payload using an endpoint.
+        """
+        #TODO: Add validation of payload
+        qos = qos or endpoint.default_qos
+        retain = retain or endpoint.default_retain
+        self.client.publish(endpoint.topic, orjson.dumps(payload), qos=qos, retain=retain)
+
+
+    def produce_about(self) -> Dict:
+        """
+        Produce a dictionary of information about the service.
+        """
+        return {
+            "type": "service",
+            "docs": {
+                "title": self.title,
+                "description": self.description,
+                "lynx_version": self.lynx_version,
+                "time_source": self.time_source.time_source_type.value,
+            },
+            "config": {},
+            "status": {},
+            "endpoints": {
+                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
+            },
+            "channels": {
+                channel.id: channel.produce_about() for channel in self.channels.values()
+            }
+        }
 
 
     def start(self):
         """
         Start the service and MQTT Client.
         """
-        for (endpoint_id, endpoint) in self.endpoints.items():
+        for endpoint in self.endpoints.values():
             if endpoint.endpoint_direction == LynxEndpointDirection.SUB:
                 self.client.message_callback_add(
-                    sub=f"{self.id}/{endpoint.topic}", 
+                    sub=endpoint.topic, 
                     callback=endpoint.callback)
-        for (channel_id, channel) in self.channels.items():
-            for (endpoint_id, endpoint) in channel.endpoints.items():
+        for channel in self.channels.values():
+            for endpoint in channel.endpoints.values():
                 if endpoint.endpoint_direction == LynxEndpointDirection.SUB:
                     self.client.message_callback_add(
-                        sub=f"{self.id}/{channel.id}/{endpoint.topic}",
+                        sub=endpoint.topic,
                         callback=endpoint.callback)
-                    print(f"{self.id}/{channel.id}/{endpoint.topic}")
 
         self.client.on_message = self.no_endpoint_message
-        # self.client.message_callback_add("#", lambda client, userdata, message: self.logger.info(f"Received message on topic {message.topic}"))
         self.client.on_connect = self.on_connect
+        
         try:
             self.client.connect(host="localhost", port=1883, keepalive=60)
         except ConnectionRefusedError as e:
