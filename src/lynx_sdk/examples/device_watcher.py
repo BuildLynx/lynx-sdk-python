@@ -11,12 +11,12 @@ service = Service(
 
 
 @service.new_poll_channel(
-    "cpu_temp",
-    title="CPU Temperature Sensor",
-    description="Polls the CPU thermal zone",
-    output_data_schema={"temp": {"type": "number", "unit": "°C"}})
-def sample_cpu_temperature():
-    return {"temp": psutil.sensors_temperatures()}
+    "cpu_load",
+    title="CPU Load",
+    description="Polls the CPU load",
+    output_data_schema={"load": {"type": "number", "unit": "%"}})
+def sample_cpu_load():
+    return {"load": psutil.cpu_percent(interval=1)}
     # any exception will be caught by the Channel and published as an exception
 
 

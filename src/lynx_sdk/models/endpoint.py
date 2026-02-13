@@ -48,11 +48,10 @@ class LynxEndpointDirection(Enum):
 class Endpoint():
     def __init__(self, 
         topic: str,
-        handler: Callable,
         endpoint_direction: LynxEndpointDirection,
         description: str = "",
         payload_schema: Optional[object] = None,
-        allow_run_while_busy: bool = True):
+        logger: Optional[Logger] = None):
         """
         Initialize a Lynx Endpoint object.
 
@@ -76,12 +75,50 @@ class Endpoint():
                     }
                 }
         """
-        self.logger: Logger = getLogger(__name__)
         self.topic: str = topic
-        self.handler: Callable = handler
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
         self.description: str = description,
         self.payload_schema: object = payload_schema
+        self.logger: Logger = logger or getLogger(__name__)
+
+
+    def validate_payload(self, payload_dict: Dict) -> None:
+        """
+        Validate a payload dictionary against a JSON schema.
+        """
+        if not validate_json_object(payload_dict, self.payload_schema):
+            error_msg = f"Payload validation failed for endpoint '{self.topic}'"
+            self.logger.warning(f"{error_msg}. Payload: {payload_dict}")
+            raise ValueError(error_msg)
+    
+    
+    def produce_about(self) -> Dict:
+        """
+        Produce a dictionary of information about the endpoint.
+        """
+        return {
+            self.topic:{
+                "description": self.description,
+                "payload_schema": self.payload_schema
+            }
+        }
+
+
+@dataclass
+class SubEndpoint(Endpoint):
+    def __init__(self,
+        topic: str,
+        handler: Callable,
+        description: str = "",
+        payload_schema: Optional[object] = None,
+        allow_run_while_busy: bool = True,
+        logger: Optional[Logger] = None):
+        """
+        Initialize a Lynx Subscribe Endpoint object.
+        """
+        super().__init__(topic, LynxEndpointDirection.SUB, description, payload_schema, logger)
+        self.handler: Callable = handler
+        self.allow_run_while_busy: bool = allow_run_while_busy
 
 
     def callback(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
@@ -106,6 +143,10 @@ class Endpoint():
         """
         self.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
         
+        if self.endpoint_direction == LynxEndpointDirection.PUB:
+            self.logger.info(f"This is a pub endpoint: {self.topic}")
+            return None
+        
         # Parse JSON bytes to dictionary
         try:
             payload_dict: Dict = orjson.loads(message.payload)
@@ -125,14 +166,34 @@ class Endpoint():
                 f"Handler exception for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
-            raise
-    
 
-    def validate_payload(self, payload_dict: Dict) -> None:
+
+@dataclass
+class PubEndpoint(Endpoint):
+    def __init__(self,
+        topic: str,
+        description: str = "",
+        default_qos: int = 0,
+        default_retain: bool = False,
+        payload_schema: Optional[object] = None,
+        logger: Optional[Logger] = None):
         """
-        Validate a payload dictionary against a JSON schema.
+        Initialize a Lynx Subscribe Endpoint object.
         """
-        if not validate_json_object(payload_dict, self.payload_schema):
-            error_msg = f"Payload validation failed for endpoint '{self.topic}'"
-            self.logger.warning(f"{error_msg}. Payload: {payload_dict}")
-            raise ValueError(error_msg)
+        super().__init__(topic, LynxEndpointDirection.PUB, description, payload_schema, logger)
+        self.default_qos: int = default_qos
+        self.default_retain: bool = default_retain
+
+
+    def publish(self, 
+        payload: Dict, 
+        client: mqtt.Client,
+        qos: int = None,
+        retain: bool = None) -> None:
+        """
+        Publish a payload using the endpoint topic.
+        """
+        # TODO: add validation of payload
+        qos = qos or self.default_qos
+        retain = retain or self.default_retain
+        client.publish(self.topic, orjson.dumps(payload), qos=qos, retain=retain)

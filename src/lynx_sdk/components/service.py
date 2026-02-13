@@ -16,7 +16,7 @@ import time
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
-from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection
+from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint
 
 # -External Imports-
 import paho.mqtt.client as mqtt
@@ -58,10 +58,9 @@ class Service():
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
         # -Endpoints-
         self.endpoints: Dict[str, Endpoint] = {
-            "?/About": Endpoint(
+            "?/About": SubEndpoint(
                 topic="?/About",
                 handler=lambda args: print("About:", args),
-                endpoint_direction=LynxEndpointDirection.SUB,
                 description="Get information about the service.",
                 payload_schema={}),
         }
@@ -118,6 +117,7 @@ class Service():
         def decorator(poll_function: Callable):
             new_channel = Channel(
                 id=id,
+                client=self.client,
                 title=title,
                 description=description,
                 poll_function=poll_function,
@@ -147,6 +147,7 @@ class Service():
         def decorator(start_stream_function: Callable):
             new_channel = Channel(
                 id=id,
+                client=self.client,
                 title=title,
                 description=description,
                 poll_function=None,
@@ -194,13 +195,18 @@ class Service():
             for (endpoint_id, endpoint) in channel.endpoints.items():
                 if endpoint.endpoint_direction == LynxEndpointDirection.SUB:
                     self.client.message_callback_add(
-                        sub=endpoint.topic, 
+                        sub=f"{self.id}/{channel.id}/{endpoint.topic}",
                         callback=endpoint.callback)
+                    print(f"{self.id}/{channel.id}/{endpoint.topic}")
 
         self.client.on_message = self.no_endpoint_message
-        self.client.message_callback_add("#", lambda client, userdata, message: self.logger.info(f"Received message on topic {message.topic}"))
+        # self.client.message_callback_add("#", lambda client, userdata, message: self.logger.info(f"Received message on topic {message.topic}"))
         self.client.on_connect = self.on_connect
-        self.client.connect(host="localhost", port=1883, keepalive=60)
+        try:
+            self.client.connect(host="localhost", port=1883, keepalive=60)
+        except ConnectionRefusedError as e:
+            self.logger.error(f"Failed to connect to MQTT broker, is the broker running?")
+            return
         self.client.loop_start()
         while True:
             time.sleep(1)
