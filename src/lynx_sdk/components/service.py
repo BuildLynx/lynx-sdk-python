@@ -202,9 +202,11 @@ class Service():
         #TODO: Add validation of payload
         qos = qos or endpoint.default_qos
         retain = retain or endpoint.default_retain
+        
         publish_properties = Properties(PacketTypes.PUBLISH)
         publish_time = self.time_source.get_time()
-        publish_properties.UserProperty = ("time", f"{publish_time['sec']}.{publish_time['nsec']}")
+        publish_properties.UserProperty = ("sec", str(publish_time['sec']))
+        publish_properties.UserProperty = ("nsec", str(publish_time['nsec']))
         self.client.publish(
             topic=endpoint.topic,
             payload=orjson.dumps(payload),
