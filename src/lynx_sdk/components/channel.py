@@ -1,5 +1,5 @@
 """
-DESCRIPTION
+Channel class for Lynx. A Channel is the encapsulation of a single input and/or output data stream.
 """
 
 
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import threading
 import time
 import itertools
+import copy
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint,SubEndpoint, PubEndpoint
@@ -114,26 +115,25 @@ def generate_full_data_schema(output_data_schema: Optional[Dict]=None) -> Option
     if output_data_schema is None:
         return None
     else:
-        full_output_data_schema = OUTPUT_DATA_PAYLOAD_SCHEMA
+        full_output_data_schema: Dict = copy.deepcopy(OUTPUT_DATA_PAYLOAD_SCHEMA)
         full_output_data_schema["data"]["properties"] = output_data_schema
         return full_output_data_schema
 
 
 
-#  === CLASSES ===
+# === CLASSES ===
 
-@dataclass
 class Channel():
     def __init__(self,
         id: str,
         service: Service,
         title: str = "",
         description: str = "",
-        poll_function: Callable = None,
-        start_stream_function: Callable = None,
-        output_data_schema: Dict = None,
+        poll_function: Optional[Callable] = None,
+        start_stream_function: Optional[Callable] = None,
+        output_data_schema: Optional[Dict] = None,
         lynx_version: str = LYNX_VERSION,
-        time_source: TimeSource = None):
+        time_source: Optional[TimeSource] = None):
         """
         Initialize a Lynx Channel object.
         """
@@ -141,8 +141,8 @@ class Channel():
         self.title: str = title
         self.description: str = description
         self.service: Service = service
-        self.poll_function: Optional[Callable] = poll_function
-        self.start_stream_function: Optional[Callable] = start_stream_function
+        self._poll_function: Optional[Callable] = poll_function
+        self._start_stream_function: Optional[Callable] = start_stream_function
         self.lynx_version: str = lynx_version
         self.time_source: Optional[TimeSource] = time_source or self.service.time_source
 
@@ -174,8 +174,8 @@ class Channel():
             self.endpoints[stream_topic] = SubEndpoint(
                 topic=stream_topic,
                 handler=self.stream_handler,
-                description="Poll the channel for data.",
-                payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
+                description="Start the Channel's data stream.",
+                payload_schema=COMMAND_STREAM_PAYLOAD_SCHEMA)
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
             stop_topic = f"{self.service.id}/{self.id}/!/Stop"
@@ -197,9 +197,9 @@ class Channel():
     def from_dict(
         cls, 
         channel_dict: Dict, 
-        time_source: TimeSource = None, 
-        poll_function: Callable = None,
-        start_stream_function: Callable = None):
+        time_source: Optional[TimeSource] = None, 
+        poll_function: Optional[Callable] = None,
+        start_stream_function: Optional[Callable] = None) -> "Channel":
         """
         Initialize a Lynx Channel object from a dictionary.
         """
@@ -226,7 +226,7 @@ class Channel():
             if idx == 0:
                 current_perf_counter_diff = 0
 
-            data = self.poll_function()
+            data = self._poll_function()
 
             return_data.append({
                 "sec": current_perf_counter_diff // int(1e9),
@@ -237,13 +237,13 @@ class Channel():
             time.sleep(interval)
 
 
-    def poll_handler(self, message: mqtt.MQTTMessage):
+    def poll_handler(self, payload: Dict):
         """
         Handle a poll request.
         """
-        num_samples = message.get("numSamples", 1)
-        interval = message.get("interval", 0)
-        include = message.get("include", {True})
+        num_samples = payload.get("numSamples", 1)
+        interval = payload.get("interval", 0)
+        include = payload.get("include", True)
         start_time = self.time_source.get_time()
         data_list = []
         poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, data_list))
@@ -259,7 +259,7 @@ class Channel():
         """
         Handle a stream start request.
         """
-        self.start_stream_function(message, self.stream_callback)
+        self._start_stream_function(message, self.stream_callback)
     
 
     def stream_callback(self, data: Any):

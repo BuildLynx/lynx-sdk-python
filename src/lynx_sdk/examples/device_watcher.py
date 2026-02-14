@@ -17,15 +17,15 @@ service = Service(
     output_data_schema={"load": {"type": "number", "unit": "%"}})
 def sample_cpu_load():
     return {"load": psutil.cpu_percent(interval=1)}
-    # any exception will be caught by the Channel and published as an exception
+    #TODO any exception will be caught by the Channel and published as an exception
 
 
-def sample_temperature():
-    # Check if the function is supported on the current system
-    if hasattr(psutil, "sensors_temperatures"):
-        return {"cpu_temperature": psutil.sensors_temperatures()}
-    else:
-        service.publish_exception("No temperature sensors found or supported on this system.")
+# def sample_temperature():
+#     # Check if the function is supported on the current system
+#     if hasattr(psutil, "sensors_temperatures"):
+#         return {"cpu_temperature": psutil.sensors_temperatures()}
+#     else:
+#         service.publish_exception("No temperature sensors found or supported on this system.")
 
 
 def sample_memory_status():
@@ -77,7 +77,7 @@ memory_channel = Channel(
 
 
 
-service.channels["memory"]=memory_channel
+service.channels["memory"] = memory_channel
 
 
 

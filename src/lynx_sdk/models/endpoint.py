@@ -1,8 +1,5 @@
 """
-This module provides a general client for Lynx.
-
-It is based on the Mosquitto client library and provides a general 
- client for Lynx.
+This module provides an endpoint for Lynx.
 """
 
 
@@ -44,7 +41,6 @@ class LynxEndpointDirection(Enum):
     PUBSUB = "pubsub"
 
 
-@dataclass
 class Endpoint():
     def __init__(self, 
         topic: str,
@@ -99,7 +95,7 @@ class Endpoint():
         about_dict = {
             "endpoint_direction": self.endpoint_direction.value,
         }
-        
+
         if self.description is not None:
             about_dict["description"] = self.description
         
@@ -108,7 +104,6 @@ class Endpoint():
         return about_dict
 
 
-@dataclass
 class SubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
@@ -172,7 +167,6 @@ class SubEndpoint(Endpoint):
             )
 
 
-@dataclass
 class PubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
@@ -182,7 +176,7 @@ class PubEndpoint(Endpoint):
         default_retain: bool = False,
         logger: Optional[Logger] = None):
         """
-        Initialize a Lynx Subscribe Endpoint object.
+        Initialize a Lynx Publish Endpoint object.
         """
         super().__init__(topic, LynxEndpointDirection.PUB, payload_schema, description, logger)
         self.default_qos: int = default_qos

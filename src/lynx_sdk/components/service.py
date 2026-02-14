@@ -1,5 +1,6 @@
 """
-Service 
+Service class for Lynx. A Service is the encapsulation of a single application or service, it contains Channels, 
+a Time Source, an MQTT Client, and has its own Endpoints.
 """
 
 
@@ -39,15 +40,14 @@ import orjson
 
 #  === CLASSES ===
 
-@dataclass
 class Service():
     def __init__(self,
         id: str,
         title: str = "",
         description: str = "",
         lynx_version: str = LYNX_VERSION,
-        time_source: TimeSource = None,
-        logger: Logger = None):
+        time_source: Optional[TimeSource] = None,
+        logger: Optional[Logger] = None):
         """
         Initialize a Lynx Service object.
         """
@@ -86,12 +86,12 @@ class Service():
 
 
     @classmethod
-    def from_dict(cls, service_dict: Dict, create_channels: bool=False):
+    def from_dict(cls, service_dict: Dict, create_channels: bool = False) -> "Service":
         """
         Initialize a Lynx Service object from a dictionary.
         """
         if create_channels:
-            channels = {{id, Channel.from_dict(channel_dict)} for id, channel_dict in service_dict["channels"].items()}
+            channels = {{id: Channel.from_dict(channel_dict)} for id, channel_dict in service_dict["channels"].items()}
         else:
             channels = {}
 
@@ -101,7 +101,8 @@ class Service():
             description=service_dict["description"],
             lynx_version=service_dict["lynx_version"],
             time_source=service_dict["time_source"],
-            endpoints={{id, Endpoint.from_dict(endpoint_dict)} for id, endpoint_dict in service_dict["endpoints"].items()},
+            # TODO: Implement Endpoint.from_dict
+            endpoints={{id: Endpoint.from_dict(endpoint_dict)} for id, endpoint_dict in service_dict["endpoints"].items()},
             channels=channels
         )
 
@@ -118,8 +119,8 @@ class Service():
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Dict = None,
-        time_source: TimeSource = None):
+        output_data_schema: Optional[Dict] = None,
+        time_source: Optional[TimeSource] = None):
         """
         Create a new poll channel for the service.
         """
@@ -148,8 +149,8 @@ class Service():
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Dict = None,
-        time_source: TimeSource = None):
+        output_data_schema: Optional[Dict] = None,
+        time_source: Optional[TimeSource] = None):
         """
         Create a new stream channel for the service.
         """
@@ -177,14 +178,14 @@ class Service():
         """
         Add an endpoint to the service.
         """
-        self.endpoints[endpoint.id] = endpoint
+        self.endpoints[endpoint.topic] = endpoint
     
 
     def no_endpoint_message(self, client, userdata, message):
         """
         Emit a notice that the service received a message on an endpoint that is not configured.
         """
-        print(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
+        self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
 
 
     def on_connect(self, client:mqtt.Client, userdata:Any, flags:Dict, reason_code:int, properties:Properties):
@@ -195,7 +196,7 @@ class Service():
         self.client.subscribe(f"{self.id}/#")
     
 
-    def publish_using_endpoint(self, endpoint:Endpoint, payload:Dict, qos:Optional[int]=None, retain:Optional[bool]=None):
+    def publish_using_endpoint(self, endpoint:PubEndpoint, payload:Dict, qos:Optional[int]=None, retain:Optional[bool]=None):
         """
         Publish a payload using an endpoint.
         """

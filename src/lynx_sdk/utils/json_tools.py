@@ -34,7 +34,7 @@ def trim_payload_by_include(
     payload: Dict,
     include: Dict | List | bool = True) -> Any:
     """
-    Recurisvely build a JSON dict by trimming a superset dict by a dict of keys to include.
+    Recursively build a JSON dict by trimming a superset dict by a dict of keys to include.
     """
     try:
         # -Boolean cases-
@@ -43,11 +43,17 @@ def trim_payload_by_include(
         elif include is False:
             return None
         # -List case-
-        if isinstance(payload, List): # Have to dig one level deeper in payload if it's an array
-            return [trim_payload_by_include(item, include[0]) for item in payload]
+        elif isinstance(include, List) and len(include) > 0: # Have to dig one level deeper in payload if it's an array
+            if isinstance(payload, List) and len(payload) > 0:
+                return [trim_payload_by_include(item, include[0]) for item in payload]
+            else:
+                return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected List.")
         # -Dict case-
         elif isinstance(include, Dict):
-            return {key: trim_payload_by_include(payload[key], include[key]) for key in include.keys()}     
+            if isinstance(payload, Dict) and len(payload) > 0:
+                return {key: trim_payload_by_include(payload[key], include[key]) for key in include.keys()}
+            else:
+                return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected Dict.")
         else:
             raise PayloadBuildingError(f"Invalid type in \"Include\" object: {type(include)}. Expected Dict, List, or bool.")
     except KeyError as e:
@@ -62,14 +68,12 @@ def validate_json_object(
     ) -> bool:
     """
     Validate a JSON object against a JSON schema. By default, it uses the Draft 7 validator.
+        Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
     """
-    try:
-        if validator is None:
-            validator = jsonschema.Draft7Validator(json_schema)
-        validator.validate(json_object)
-        return True
-    except jsonschema.exceptions.ValidationError:
-        return False
+    if validator is None:
+        validator = jsonschema.Draft7Validator(json_schema)
+    validator.validate(json_object)
+    return True
 
 
 def validate_json_object_properties(
