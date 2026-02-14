@@ -20,6 +20,8 @@ from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoin
 
 # -External Imports-
 import paho.mqtt.client as mqtt
+from paho.mqtt.properties import Properties
+from paho.mqtt.packettypes import PacketTypes
 import orjson
 
 
@@ -58,14 +60,16 @@ class Service():
         # -Time Source-
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
         # -Endpoints-
+        get_about_topic: str = f"{self.id}/?/About"
+        sys_about_topic: str = f"{self.id}/@/About"
         self.endpoints: Dict[str, Endpoint] = {
-            "?/About": SubEndpoint(
-                topic=f"{self.id}/?/About",
-                handler=lambda args: self.publish_using_endpoint(self.endpoints["@/About"], self.produce_about()),
+            get_about_topic: SubEndpoint(
+                topic=get_about_topic,
+                handler=lambda args: self.publish_using_endpoint(self.endpoints[sys_about_topic], self.produce_about()),
                 description="Get information about the Service.",
                 payload_schema={}),
-            "@/About": PubEndpoint(
-                topic=f"{self.id}/@/About",
+            sys_about_topic: PubEndpoint(
+                topic=sys_about_topic,
                 description="Emit information about the Service.",
                 payload_schema={}),
         }
@@ -74,7 +78,11 @@ class Service():
         # -Logger-
         self.logger: Logger = logger or getLogger(self.id)
         # -MQTT Client-
-        self.client: mqtt.Client = mqtt.Client()
+        self.client: mqtt.Client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, 
+            client_id=self.id,
+            protocol=mqtt.MQTTv5
+        )
 
 
     @classmethod
@@ -177,13 +185,13 @@ class Service():
         Emit a notice that the service received a message on an endpoint that is not configured.
         """
         print(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
-    
 
-    def on_connect(self, client:mqtt.Client, userdata:Any, flags:Dict, rc:int):
+
+    def on_connect(self, client:mqtt.Client, userdata:Any, flags:Dict, reason_code:int, properties:Properties):
         """
         Callback for when the client connects to the MQTT broker.
         """
-        self.logger.info(f"Connected to MQTT broker with result code {rc}")
+        self.logger.info(f"Connected to MQTT broker with result code {reason_code}")
         self.client.subscribe(f"{self.id}/#")
     
 
@@ -194,7 +202,15 @@ class Service():
         #TODO: Add validation of payload
         qos = qos or endpoint.default_qos
         retain = retain or endpoint.default_retain
-        self.client.publish(endpoint.topic, orjson.dumps(payload), qos=qos, retain=retain)
+        publish_properties = Properties(PacketTypes.PUBLISH)
+        publish_time = self.time_source.get_time()
+        publish_properties.UserProperty = ("time", f"{publish_time['sec']}.{publish_time['nsec']}")
+        self.client.publish(
+            topic=endpoint.topic,
+            payload=orjson.dumps(payload),
+            qos=qos,
+            retain=retain,
+            properties=publish_properties)
 
 
     def produce_about(self) -> Dict:
@@ -238,7 +254,7 @@ class Service():
 
         self.client.on_message = self.no_endpoint_message
         self.client.on_connect = self.on_connect
-        
+
         try:
             self.client.connect(host="localhost", port=1883, keepalive=60)
         except ConnectionRefusedError as e:

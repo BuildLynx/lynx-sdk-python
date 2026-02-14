@@ -47,6 +47,13 @@ COMMAND_POLL_PAYLOAD_SCHEMA = {
         "description": "Default everything to true if empty",
         "default": {},
         "type": "object"
+    },
+    "paginate": {
+        "title": "Paginate",
+        "description": "0 for no pagination, positive int for page size, default 0",
+        "default": 0,
+        "type": "integer",
+        "minimum": 0
     }
 }
 
@@ -63,6 +70,13 @@ COMMAND_STREAM_PAYLOAD_SCHEMA = {
         "description": "Default everything to true if empty",
         "default": {},
         "type": "object"
+    },
+    "paginate": {
+        "title": "Paginate",
+        "description": "0 for no pagination, positive int for page size, default 0",
+        "default": 0,
+        "type": "integer",
+        "minimum": 0
     }
 }
 
@@ -129,39 +143,54 @@ class Channel():
         self.service: Service = service
         self.poll_function: Optional[Callable] = poll_function
         self.start_stream_function: Optional[Callable] = start_stream_function
-        self.data_schema: Optional[Dict] = generate_full_data_schema(output_data_schema)
         self.lynx_version: str = lynx_version
-        self.time_source: Optional[TimeSource] = time_source
+        self.time_source: Optional[TimeSource] = time_source or self.service.time_source
 
         # -Endpoints-
-        self.endpoints: Dict[str, Endpoint] = {}
+        get_about_topic: str = f"{self.service.id}/{self.id}/?/About"
+        sys_about_topic: str = f"{self.service.id}/{self.id}/@/About"
+        self.endpoints: Dict[str, Endpoint] = {
+            get_about_topic: SubEndpoint(
+                topic=get_about_topic,
+                handler=lambda args: self.service.publish_using_endpoint(self.endpoints[sys_about_topic], self.produce_about()),
+                description="Get information about the Service.",
+                payload_schema={}),
+            sys_about_topic: PubEndpoint(
+                topic=sys_about_topic,
+                description="Emit information about the Service.",
+                payload_schema={}),
+        }
 
         if isinstance(poll_function, Callable):
-            self.endpoints["!/Poll"] = SubEndpoint(
-                topic=f"{self.service.id}/{self.id}/!/Poll",
+            poll_topic = f"{self.service.id}/{self.id}/!/Poll"
+            self.endpoints[poll_topic] = SubEndpoint(
+                topic=poll_topic,
                 handler=self.poll_handler,
                 description="Poll the channel for data.",
                 payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
 
         if isinstance(start_stream_function, Callable):
-            self.endpoints["!/Stream"] = SubEndpoint(
-                topic=f"{self.service.id}/{self.id}/!/Stream",
+            stream_topic = f"{self.service.id}/{self.id}/!/Stream"
+            self.endpoints[stream_topic] = SubEndpoint(
+                topic=stream_topic,
                 handler=self.stream_handler,
                 description="Poll the channel for data.",
                 payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
-            self.endpoints["!/Stop"] = SubEndpoint(
-                topic=f"{self.service.id}/{self.id}/!/Stop",
+            stop_topic = f"{self.service.id}/{self.id}/!/Stop"
+            self.endpoints[stop_topic] = SubEndpoint(
+                topic=stop_topic,
                 handler=self.stop,
                 description="Stop the channel.",
                 payload_schema={})
 
-        if self.data_schema is not None:
-            self.endpoints["<"] = PubEndpoint(
-                topic=f"{self.service.id}/{self.id}/<",
+        if output_data_schema is not None:
+            output_data_topic = f"{self.service.id}/{self.id}/<"
+            self.endpoints[output_data_topic] = PubEndpoint(
+                topic=output_data_topic,
                 description="Output data",
-                payload_schema=self.data_schema)
+                payload_schema=generate_full_data_schema(output_data_schema))
 
 
     @classmethod
@@ -187,7 +216,8 @@ class Channel():
 
     def repeat_polling(self, num_samples: int, interval: float, return_data: List[Dict[str, Any]]):
         """
-        Repeat the polling function for the given number of samples and interval.
+        Repeat the polling function for the given number of samples and interval. It appends the data to the return_data
+            list provided to it. (It does this rather than return since threading calls don't support returns.)
         """
         loop_range = itertools.count() if num_samples == 0 else range(num_samples)
         start_perf_counter = time.perf_counter_ns()
@@ -205,7 +235,6 @@ class Channel():
             })
 
             time.sleep(interval)
-        print("done polling")
 
 
     def poll_handler(self, message: mqtt.MQTTMessage):
@@ -223,12 +252,12 @@ class Channel():
         # for data in data_list:
         #     self.output_data_schema.validate(data)
         #     self.output_data_schema.publish(data)
-        self.service.publish_using_endpoint(self.endpoints["<"], data_list)
+        self.service.publish_using_endpoint(self.endpoints[f"{self.service.id}/{self.id}/<"], data_list)
 
 
     def stream_handler(self, message: mqtt.MQTTMessage):
         """
-        Handle a poll request.
+        Handle a stream start request.
         """
         self.start_stream_function(message, self.stream_callback)
     

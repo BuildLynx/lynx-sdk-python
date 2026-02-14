@@ -24,6 +24,7 @@ from enum import Enum
 # === GLOBALS VARIABLES ===
 
 EPOCH_DELTA_1970_TO_2000 = 946684800   # 30 years incl leap days
+NSEC_PER_SEC = int(1e9)
 
 
 # === FUNCTIONS ===
@@ -58,8 +59,8 @@ class ProcessPerfTimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.perf_counter_ns()-self._start_time
         return {
-            "sec": current_time // 1e9,
-            "nsec": current_time % 1e9
+            "sec": current_time // NSEC_PER_SEC,
+            "nsec": current_time % NSEC_PER_SEC
         }
     
 
@@ -76,8 +77,8 @@ class UnixTimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
         return {
-            "sec": current_time // 1e9,
-            "nsec": current_time % 1e9
+            "sec": current_time // NSEC_PER_SEC,
+            "nsec": current_time % NSEC_PER_SEC
         }
 
 
@@ -93,8 +94,8 @@ class Epoch2000TimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
         return {
-            "sec": (current_time // 1e9) + EPOCH_DELTA_1970_TO_2000,
-            "nsec": current_time % 1e9
+            "sec": (current_time // NSEC_PER_SEC) + EPOCH_DELTA_1970_TO_2000,
+            "nsec": current_time % NSEC_PER_SEC
         }
 
 
