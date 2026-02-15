@@ -14,17 +14,16 @@ from logging import Logger, getLogger
 import time
 
 # -Lynx Imports-
+from lynx_sdk.components.component import Component
 from lynx_sdk.components.channel import Channel
-from lynx_sdk.utils.structures import LYNX_VERSION
+from lynx_sdk.utils.structures import LYNX_VERSION, ComponentType
+from lynx_sdk.utils.mqtt_client import MqttClient
 from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
 from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint, PubEndpoint
 from lynx_sdk.models.notice import LoggingNoticeHandler
 
 # -External Imports-
-import paho.mqtt.client as mqtt
 from paho.mqtt.properties import Properties
-from paho.mqtt.packettypes import PacketTypes
-import orjson
 
 
 # === CONSTANTS ===
@@ -47,7 +46,7 @@ class ServiceStatus():
         
 
 
-class Service():
+class Service(Component):
     def __init__(self,
         id: str,
         title: str = "",
@@ -58,82 +57,80 @@ class Service():
         emit_logs_as_notices: bool = True):
         """
         Initialize a Lynx Service object.
+        
+        Args:
+            id: Unique identifier for this service
+            title: Human-readable title
+            description: Human-readable description
+            lynx_version: Lynx protocol version
+            time_source: Time source for timestamps (defaults to ideal source for platform)
+            logger: Logger for this service (defaults to logger named after id)
+            emit_logs_as_notices: Whether to publish log messages as notices to MQTT
         """
 
-        # -Docs-
-        self.id: str = id
-        self.title: str = title
-        self.description: str = description
-        self.lynx_version: str = lynx_version
-        # -Time Source-
-        self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
-        # -Endpoints-
-        self.get_about_topic: str = f"{self.id}/?/About"
-        self.sys_about_topic: str = f"{self.id}/@/About"
-        self.sys_notice_topic: str = f"{self.id}/@/Notice"
-        self.endpoints: Dict[str, Endpoint] = {
-            self.get_about_topic: SubEndpoint(
-                topic=self.get_about_topic,
-                handler=lambda args: self.endpoints[self.sys_about_topic].publish(payload=self.produce_about()),
-                service=self,
-                description="Get information about the Service.",
-                payload_schema={}),
-            self.sys_about_topic: PubEndpoint(
-                topic=self.sys_about_topic,
-                description="Emit information about the Service.",
-                payload_schema={},
-                service=self,
-                default_qos=1,
-                default_retain=True),
-            self.sys_notice_topic: PubEndpoint(
-                topic=self.sys_notice_topic,
-                description="Emit a notice about the Service.",
-                payload_schema={},
-                service=self,
-                default_qos=1,
-                default_retain=False)
-        }
+        if time_source is None:
+            time_source = instantiate_ideal_time_source()
+        if logger is None:
+            logger = getLogger(id)
+
+        # Initialize Component base class
+        super().__init__(
+            id=id,
+            component_type=ComponentType.SERVICE,
+            title=title,
+            description=description,
+            lynx_version=lynx_version,
+            time_source=time_source,
+            logger=logger,
+            emit_logs_as_notices=emit_logs_as_notices
+        )
+        
+        # -Service-specific initialization-
         # -Channels-
         self.channels: Dict[str, Channel] = {}
-        # -Logger-
-        self.logger: Logger = logger or getLogger(self.id)
-        if emit_logs_as_notices:
-            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.endpoints[self.sys_notice_topic]))
+        
         # -MQTT Client-
-        self.client: mqtt.Client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, 
+        self.client: MqttClient = MqttClient(
             client_id=self.id,
-            protocol=mqtt.MQTTv5
+            time_source=self.time_source
         )
+        
+        # -Endpoints-
+        self.get_about_endpoint: SubEndpoint = SubEndpoint(
+            topic=f"{self.id}/?/About",
+            description="Get information about the Service.",
+            handler=lambda args: self.endpoints[self.sys_about_endpoint.topic].publish(payload=self.produce_about()),
+            mqtt_client=self.client,
+            time_source=self.time_source,
+            logger=self.logger,
+            payload_schema={})
+        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
 
+        self.sys_about_endpoint: PubEndpoint = PubEndpoint(
+            topic=f"{self.id}/@/About",
+            description="Emit information about the Service.",
+            mqtt_client=self.client,
+            time_source=self.time_source,
+            logger=self.logger,
+            payload_schema={},
+            default_qos=1,
+            default_retain=True)
+        self.endpoints[self.sys_about_endpoint.topic] = self.sys_about_endpoint
 
-    # @classmethod
-    # def from_dict(cls, service_dict: Dict, create_channels: bool = False) -> "Service":
-    #     """
-    #     Initialize a Lynx Service object from a dictionary.
-    #     """
-    #     if create_channels:
-    #         channels = {{id: Channel.from_dict(channel_dict)} for id, channel_dict in service_dict["channels"].items()}
-    #     else:
-    #         channels = {}
-
-    #     return cls(
-    #         id=service_dict["id"],
-    #         title=service_dict["title"],
-    #         description=service_dict["description"],
-    #         lynx_version=service_dict["lynx_version"],
-    #         time_source=service_dict["time_source"],
-    #         # TODO: Implement Endpoint.from_dict
-    #         endpoints={{id: Endpoint.from_dict(endpoint_dict)} for id, endpoint_dict in service_dict["endpoints"].items()},
-    #         channels=channels
-    #     )
-
-
-    # def add_channel(self, channel: Channel):
-    #     """
-    #     Add a channel to the service.
-    #     """
-    #     self.channels[channel.id] = channel
+        self.sys_notice_endpoint: PubEndpoint = PubEndpoint(
+            topic=f"{self.id}/@/Notice",
+            description="Emit a notice about the Service.",
+            mqtt_client=self.client,
+            time_source=self.time_source,
+            logger=self.logger,
+            payload_schema={},
+            default_qos=1,
+            default_retain=False)
+        self.endpoints[self.sys_notice_endpoint.topic] = self.sys_notice_endpoint
+        
+        # -Setup logging with notices-
+        if emit_logs_as_notices:
+            self.logger.addHandler(LoggingNoticeHandler(self.sys_notice_endpoint))
 
 
     def new_poll_channel(
@@ -196,12 +193,6 @@ class Service():
         return decorator
     
 
-    # def add_endpoint(self, endpoint: Endpoint):
-    #     """
-    #     Add an endpoint to the service.
-    #     """
-    #     self.endpoints[endpoint.topic] = endpoint
-    
 
     def no_endpoint_message(self, client, userdata, message):
         """
@@ -210,89 +201,46 @@ class Service():
         self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
 
 
-    def on_connect(self, client:mqtt.Client, userdata:Any, flags:Dict, reason_code:int, properties:Properties):
+    def on_connect(self, client, userdata: Any, flags: Dict, reason_code: int, properties: Properties):
         """
         Callback for when the client connects to the MQTT broker.
         """
         self.logger.info(f"Connected to MQTT broker with result code {reason_code}")
         self.client.subscribe(f"{self.id}/#")
-    
-
-    def publish_using_endpoint(
-        self, 
-        endpoint:PubEndpoint, 
-        payload:Dict, 
-        qos:int, 
-        retain:bool,
-        properties: Dict[str, str] = {}) -> Optional[mqtt.MQTTMessage]:
-        """
-        Publish a payload using an endpoint.
-        """
-        #TODO: Add validation of payload
-
-        publish_properties = Properties(PacketTypes.PUBLISH)
-        publish_time = self.time_source.get_time()
-        for key, value in properties.items():
-            publish_properties.UserProperty = (key, value)
-        if "sec" not in properties and "nsec" not in properties:
-            publish_properties.UserProperty = ("sec", str(publish_time['sec']))
-            publish_properties.UserProperty = ("nsec", str(publish_time['nsec']))
-        return self.client.publish(
-            topic=endpoint.topic,
-            payload=orjson.dumps(payload),
-            qos=qos,
-            retain=retain,
-            properties=publish_properties)
 
 
     def produce_about(self) -> Dict:
         """
         Produce a dictionary of information about the service.
+        Extends the base Component.produce_about() with service-specific channels.
         """
-        return {
-            "type": "service",
-            "docs": {
-                "title": self.title,
-                "description": self.description,
-                "lynx_version": self.lynx_version,
-                "time_source": self.time_source.time_source_type.value,
-            },
-            "config": {},
-            "status": {},
-            "endpoints": {
-                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
-            },
-            "channels": {
-                channel.id: channel.produce_about() for channel in self.channels.values()
-            }
+        about = super().produce_about()
+        about["channels"] = {
+            channel.id: channel.produce_about() for channel in self.channels.values()
         }
+        return about
 
 
     def start(self):
         """
         Start the service and MQTT Client.
         """
-        for endpoint in self.endpoints.values():
-            if endpoint.endpoint_direction == LynxEndpointDirection.SUB:
-                self.client.message_callback_add(
-                    sub=endpoint.topic, 
-                    callback=endpoint.callback)
-        for channel in self.channels.values():
-            for endpoint in channel.endpoints.values():
-                if endpoint.endpoint_direction == LynxEndpointDirection.SUB:
-                    self.client.message_callback_add(
-                        sub=endpoint.topic,
-                        callback=endpoint.callback)
-
-        self.client.on_message = self.no_endpoint_message
-        self.client.on_connect = self.on_connect
-
+        
+        # Set default callbacks
+        self.client.set_on_message(self.no_endpoint_message)
+        self.client.set_on_connect(self.on_connect)
+        
+        # Connect to broker
         try:
             self.client.connect(host="localhost", port=1883, keepalive=60)
         except ConnectionRefusedError as e:
             self.logger.error(f"Failed to connect to MQTT broker, is the broker running?")
             return
+        
+        # Start network loop
         self.client.loop_start()
+        
+        # Keep service running
         while True:
             time.sleep(1)
 

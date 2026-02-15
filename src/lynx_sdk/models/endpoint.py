@@ -13,9 +13,9 @@ from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
 from enum import Enum
 
 # -Lynx Imports-
-if TYPE_CHECKING:
-    from lynx_sdk.components.service import Service
 from lynx_sdk.utils.json_tools import validate_json_object
+from lynx_sdk.utils.mqtt_client import MqttClient
+from lynx_sdk.singletons.time_source import TimeSource
 
 # -External Imports-
 import paho.mqtt.client as mqtt
@@ -47,23 +47,22 @@ class Endpoint:
     def __init__(self,
         topic: str,
         endpoint_direction: LynxEndpointDirection,
+        mqtt_client: MqttClient,
+        time_source: TimeSource,
+        logger: Logger,
         payload_schema: object,
-        service: Service,
-        description: str = "",
-        logger: Optional[Logger] = None):
+        description: str = ""):
         """
         Initialize a Lynx Endpoint object.
 
         Args:
-            topic (str): The full topic path of the endpoint. e.g. "Service/Channel/?/About"
-            description (str): The description of the endpoint. 
-                e.g. "The client is asked for the current time according to its clock"
-            service (Service): The service that the endpoint interfaces with.
-            endpoint_direction (LynxEndpointDirection): The direction of the endpoint. 
-                e.g. LynxEndpointDirection.SUB
-            payload_schema (object): The schema for the payload of the endpoint. If the endpoint_direction is 
-                LynxEndpointDirection.PUB, the payload is what is sent from the endpoint. If the endpoint_direction is 
-                LynxEndpointDirection.SUB, the payload is what is received at the endpoint. 
+            topic: The full topic path of the endpoint. e.g. "Service/Channel/?/About"
+            endpoint_direction: The direction of the endpoint (SUB, PUB, or PUBSUB)
+            mqtt_client: MQTT client for publish/subscribe operations
+            time_source: Time source for timestamps
+            logger: Logger for this endpoint
+            payload_schema: JSON schema for the payload. For PUB endpoints, this is what is sent.
+                For SUB endpoints, this is what is received.
                 e.g. {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -78,13 +77,15 @@ class Endpoint:
                         "type": "string"
                     }
                 }
+            description: Human-readable description of the endpoint
         """
         self.topic: str = topic
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
-        self.service: Service = service
-        self.description: str = description
+        self.mqtt_client: MqttClient = mqtt_client
+        self.time_source: TimeSource = time_source
+        self.logger: Logger = logger
         self.payload_schema: object = payload_schema
-        self.logger: Logger = logger or getLogger(__name__)
+        self.description: str = description
 
 
     def validate_payload(self, payload_dict: Dict) -> None:
@@ -116,24 +117,37 @@ class Endpoint:
 class SubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
+        description: str,
         handler: Callable,
+        mqtt_client: MqttClient,
+        time_source: TimeSource,
+        logger: Logger,
         payload_schema: object,
-        service: Service,
-        description: str = "",
-        allow_run_while_busy: bool = True,
-        logger: Optional[Logger] = None):
+        allow_run_while_busy: bool = True):
         """
         Initialize a Lynx Subscribe Endpoint object.
+        
+        Args:
+            topic: MQTT topic to subscribe to
+            handler: Callback function to handle received messages
+            mqtt_client: MQTT client for operations
+            time_source: Time source for timestamps
+            logger: Logger for this endpoint
+            payload_schema: JSON schema for validating received payloads
+            description: Human-readable description
+            allow_run_while_busy: Whether to allow execution while busy
         """
         super().__init__(
             topic=topic, 
-            endpoint_direction=LynxEndpointDirection.SUB, 
+            endpoint_direction=LynxEndpointDirection.SUB,
+            mqtt_client=mqtt_client,
+            time_source=time_source,
+            logger=logger,
             payload_schema=payload_schema, 
-            service=service, 
-            description=description, 
-            logger=logger)
+            description=description)
         self.handler: Callable = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
+        self.mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
 
     def callback(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
@@ -186,22 +200,34 @@ class SubEndpoint(Endpoint):
 class PubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
+        description: str,
+        mqtt_client: MqttClient,
+        time_source: TimeSource,
+        logger: Logger,
         payload_schema: object,
-        service: Service,
-        description: str = "",
         default_qos: int = 0,
-        default_retain: bool = False,
-        logger: Optional[Logger] = None):
+        default_retain: bool = False):
         """
         Initialize a Lynx Publish Endpoint object.
+        
+        Args:
+            topic: MQTT topic to publish to
+            mqtt_client: MQTT client for publishing
+            time_source: Time source for automatic timestamps
+            logger: Logger for this endpoint
+            payload_schema: JSON schema for validating outgoing payloads
+            description: Human-readable description
+            default_qos: Default Quality of Service level (0, 1, or 2)
+            default_retain: Default retain flag
         """
         super().__init__(
             topic=topic, 
-            endpoint_direction=LynxEndpointDirection.PUB, 
+            endpoint_direction=LynxEndpointDirection.PUB,
+            mqtt_client=mqtt_client,
+            time_source=time_source,
+            logger=logger,
             payload_schema=payload_schema, 
-            service=service, 
-            description=description, 
-            logger=logger)
+            description=description)
         self.default_qos: int = default_qos
         self.default_retain: bool = default_retain
     
@@ -213,15 +239,26 @@ class PubEndpoint(Endpoint):
         retain: Optional[bool] = None,
         properties: Dict[str, str] = {}) -> mqtt.MQTTMessage:
         """
-        Publish a payload using the endpoint.
+        Publish a payload using this endpoint.
+        
+        Args:
+            payload: Dictionary payload to publish (will be JSON-encoded)
+            qos: Quality of Service level (defaults to endpoint's default_qos)
+            retain: Retain flag (defaults to endpoint's default_retain)
+            properties: Additional MQTT v5 user properties
+            
+        Returns:
+            MQTTMessageInfo from the publish operation
         """
         if qos is None:
             qos = self.default_qos
         if retain is None:
             retain = self.default_retain
         
-        return self.service.publish_using_endpoint(
-            endpoint=self, 
+        # TODO: Add payload validation against schema
+        
+        return self.mqtt_client.publish(
+            topic=self.topic,
             payload=payload,
             qos=qos,
             retain=retain,
