@@ -7,12 +7,14 @@ This module provides an endpoint for Lynx.
 # === IMPORTS ===
 
 # -stdlib Imports-
+from __future__ import annotations
 from logging import Logger, getLogger
-from typing import Callable, Optional, Any, Dict
+from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
 from enum import Enum
-from dataclasses import dataclass
 
 # -Lynx Imports-
+if TYPE_CHECKING:
+    from lynx_sdk.components.service import Service
 from lynx_sdk.utils.json_tools import validate_json_object
 
 # -External Imports-
@@ -41,11 +43,12 @@ class LynxEndpointDirection(Enum):
     PUBSUB = "pubsub"
 
 
-class Endpoint():
-    def __init__(self, 
+class Endpoint:
+    def __init__(self,
         topic: str,
         endpoint_direction: LynxEndpointDirection,
         payload_schema: object,
+        service: Service,
         description: str = "",
         logger: Optional[Logger] = None):
         """
@@ -55,7 +58,7 @@ class Endpoint():
             topic (str): The full topic path of the endpoint. e.g. "Service/Channel/?/About"
             description (str): The description of the endpoint. 
                 e.g. "The client is asked for the current time according to its clock"
-            handler (Callable): The handler function for the endpoint.
+            service (Service): The service that the endpoint interfaces with.
             endpoint_direction (LynxEndpointDirection): The direction of the endpoint. 
                 e.g. LynxEndpointDirection.SUB
             payload_schema (object): The schema for the payload of the endpoint. If the endpoint_direction is 
@@ -69,10 +72,16 @@ class Endpoint():
                             "type": "string"
                         }
                     }
+                } 
+                or alternatively, e.g. {
+                    "time": {
+                        "type": "string"
+                    }
                 }
         """
         self.topic: str = topic
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
+        self.service: Service = service
         self.description: str = description
         self.payload_schema: object = payload_schema
         self.logger: Logger = logger or getLogger(__name__)
@@ -109,13 +118,20 @@ class SubEndpoint(Endpoint):
         topic: str,
         handler: Callable,
         payload_schema: object,
+        service: Service,
         description: str = "",
         allow_run_while_busy: bool = True,
         logger: Optional[Logger] = None):
         """
         Initialize a Lynx Subscribe Endpoint object.
         """
-        super().__init__(topic, LynxEndpointDirection.SUB, payload_schema, description, logger)
+        super().__init__(
+            topic=topic, 
+            endpoint_direction=LynxEndpointDirection.SUB, 
+            payload_schema=payload_schema, 
+            service=service, 
+            description=description, 
+            logger=logger)
         self.handler: Callable = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
 
@@ -171,6 +187,7 @@ class PubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
         payload_schema: object,
+        service: Service,
         description: str = "",
         default_qos: int = 0,
         default_retain: bool = False,
@@ -178,6 +195,34 @@ class PubEndpoint(Endpoint):
         """
         Initialize a Lynx Publish Endpoint object.
         """
-        super().__init__(topic, LynxEndpointDirection.PUB, payload_schema, description, logger)
+        super().__init__(
+            topic=topic, 
+            endpoint_direction=LynxEndpointDirection.PUB, 
+            payload_schema=payload_schema, 
+            service=service, 
+            description=description, 
+            logger=logger)
         self.default_qos: int = default_qos
         self.default_retain: bool = default_retain
+    
+
+    def publish(
+        self, 
+        payload: Dict, 
+        qos: Optional[int] = None, 
+        retain: Optional[bool] = None,
+        properties: Dict[str, str] = {}) -> mqtt.MQTTMessage:
+        """
+        Publish a payload using the endpoint.
+        """
+        if qos is None:
+            qos = self.default_qos
+        if retain is None:
+            retain = self.default_retain
+        
+        return self.service.publish_using_endpoint(
+            endpoint=self, 
+            payload=payload,
+            qos=qos,
+            retain=retain,
+            properties=properties)

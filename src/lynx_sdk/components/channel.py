@@ -14,16 +14,19 @@ import threading
 import time
 import itertools
 import copy
+from enum import Enum
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint,SubEndpoint, PubEndpoint
 from lynx_sdk.singletons.time_source import TimeSource
+from lynx_sdk.utils.json_tools import validate_json_schema
 from lynx_sdk.utils.structures import LYNX_VERSION
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
 
 # -External Imports-
 import paho.mqtt.client as mqtt
+import jsonschema
 
 
 # === CONSTANTS ===
@@ -123,6 +126,18 @@ def generate_full_data_schema(output_data_schema: Optional[Dict]=None) -> Option
 
 # === CLASSES ===
 
+class ChannelState(Enum):
+    BUSY = "busy"
+    IDLE = "idle"
+    DISABLED = "disabled"
+
+
+class ChannelStatus():
+    def __init__(self):
+        self.action: str = ""
+        self.state: ChannelState = ChannelState.IDLE
+
+
 class Channel():
     def __init__(self,
         id: str,
@@ -137,6 +152,12 @@ class Channel():
         """
         Initialize a Lynx Channel object.
         """
+        if output_data_schema is not None:
+            try:
+                validate_json_schema(output_data_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                pass
+        
         self.id: str = id
         self.title: str = title
         self.description: str = description
@@ -145,6 +166,7 @@ class Channel():
         self._start_stream_function: Optional[Callable] = start_stream_function
         self.lynx_version: str = lynx_version
         self.time_source: Optional[TimeSource] = time_source or self.service.time_source
+        self.last_payload: Dict = {}
 
         # -Endpoints-
         get_about_topic: str = f"{self.service.id}/{self.id}/?/About"
@@ -152,12 +174,14 @@ class Channel():
         self.endpoints: Dict[str, Endpoint] = {
             get_about_topic: SubEndpoint(
                 topic=get_about_topic,
-                handler=lambda args: self.service.publish_using_endpoint(self.endpoints[sys_about_topic], self.produce_about()),
+                handler=lambda args: self.endpoints[sys_about_topic].publish(payload=self.produce_about()),
+                service=self.service,
                 description="Get information about the Service.",
                 payload_schema={}),
             sys_about_topic: PubEndpoint(
                 topic=sys_about_topic,
                 description="Emit information about the Service.",
+                service=self.service,
                 payload_schema={}),
         }
 
@@ -166,6 +190,7 @@ class Channel():
             self.endpoints[poll_topic] = SubEndpoint(
                 topic=poll_topic,
                 handler=self.poll_handler,
+                service=self.service,
                 description="Poll the channel for data.",
                 payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA)
 
@@ -174,6 +199,7 @@ class Channel():
             self.endpoints[stream_topic] = SubEndpoint(
                 topic=stream_topic,
                 handler=self.stream_handler,
+                service=self.service,
                 description="Start the Channel's data stream.",
                 payload_schema=COMMAND_STREAM_PAYLOAD_SCHEMA)
         
@@ -182,6 +208,7 @@ class Channel():
             self.endpoints[stop_topic] = SubEndpoint(
                 topic=stop_topic,
                 handler=self.stop,
+                service=self.service,
                 description="Stop the channel.",
                 payload_schema={})
 
@@ -189,6 +216,7 @@ class Channel():
             output_data_topic = f"{self.service.id}/{self.id}/<"
             self.endpoints[output_data_topic] = PubEndpoint(
                 topic=output_data_topic,
+                service=self.service,
                 description="Output data",
                 payload_schema=generate_full_data_schema(output_data_schema))
 
@@ -252,7 +280,7 @@ class Channel():
         # for data in data_list:
         #     self.output_data_schema.validate(data)
         #     self.output_data_schema.publish(data)
-        self.service.publish_using_endpoint(self.endpoints[f"{self.service.id}/{self.id}/<"], data_list)
+        self.endpoints[f"{self.service.id}/{self.id}/<"].publish(payload=data_list)
 
 
     def stream_handler(self, message: mqtt.MQTTMessage):

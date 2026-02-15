@@ -61,34 +61,38 @@ def trim_payload_by_include(
 
 
 # -JSON Schema Tools-
+def wrap_json_in_object(
+    json_dict: Dict
+    ) -> Dict:
+    """
+    Detects if provided json_dict is a JSON schema object (by looking for the type key). 
+    If it is, returns it. If it is not, wraps it in an object. 
+    """
+    if "type" in json_dict:
+        return json_dict
+    else:
+        return {
+            "type": "object",
+            "properties": json_dict
+        }
+
+    
 def validate_json_object(
     json_object: Dict,
     json_schema: Dict,
-    validator: Optional["Validator"] = None
+    validator: Optional["Validator"] = None,
+    additional_properties: bool = False
     ) -> bool:
     """
     Validate a JSON object against a JSON schema. By default, it uses the Draft 7 validator.
-        Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
+    Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
     """
+    json_object = wrap_json_in_object(json_object)
+    json_schema = wrap_json_in_object(json_schema)
     if validator is None:
         validator = jsonschema.Draft7Validator(json_schema)
-    validator.validate(json_object)
+    validator.validate(json_object, additional_properties=additional_properties)
     return True
-
-
-def validate_json_object_properties(
-    json_object: Dict,
-    json_schema: Dict,
-    validator: Optional["Validator"] = None
-    ) -> bool:
-    """
-    Validate a JSON object against a JSON schema properties. By default, it uses the Draft 7 validator.
-    """
-    full_json_schema = {
-        "type": "object",
-        "properties": json_schema
-    }
-    return validate_json_object(json_object, full_json_schema, validator)
 
 
 def validate_json_schema(
@@ -96,15 +100,14 @@ def validate_json_schema(
     validator: Optional["Validator"] = None
     ) -> bool:
     """
-    Validate a JSON object against a JSON schema. By default, it uses the Draft 7 validator.
+    Validate a JSON schema. By default, it uses the Draft 7 validator.
+    Throws a jsonschema.exceptions.SchemaError if the JSON schema is invalid.
     """
-    try:
-        if validator is None:
-            validator = jsonschema.Draft7Validator(json_schema)
-        validator.check_schema(json_schema)
-        return True
-    except jsonschema.exceptions.SchemaError:
-        return False
+    json_schema = wrap_json_in_object(json_schema)
+    if validator is None:
+        validator = jsonschema.Draft7Validator(json_schema)
+    validator.check_schema(json_schema)
+    return True
 
 
 

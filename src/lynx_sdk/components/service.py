@@ -18,6 +18,7 @@ from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
 from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint, PubEndpoint
+from lynx_sdk.models.notice import LoggingNoticeHandler
 
 # -External Imports-
 import paho.mqtt.client as mqtt
@@ -40,6 +41,12 @@ import orjson
 
 #  === CLASSES ===
 
+class ServiceStatus():
+    def __init__(self):
+        self.action: str = ""
+        
+
+
 class Service():
     def __init__(self,
         id: str,
@@ -47,7 +54,8 @@ class Service():
         description: str = "",
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
-        logger: Optional[Logger] = None):
+        logger: Optional[Logger] = None,
+        emit_logs_as_notices: bool = True):
         """
         Initialize a Lynx Service object.
         """
@@ -60,23 +68,37 @@ class Service():
         # -Time Source-
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
         # -Endpoints-
-        get_about_topic: str = f"{self.id}/?/About"
-        sys_about_topic: str = f"{self.id}/@/About"
+        self.get_about_topic: str = f"{self.id}/?/About"
+        self.sys_about_topic: str = f"{self.id}/@/About"
+        self.sys_notice_topic: str = f"{self.id}/@/Notice"
         self.endpoints: Dict[str, Endpoint] = {
-            get_about_topic: SubEndpoint(
-                topic=get_about_topic,
-                handler=lambda args: self.publish_using_endpoint(self.endpoints[sys_about_topic], self.produce_about()),
+            self.get_about_topic: SubEndpoint(
+                topic=self.get_about_topic,
+                handler=lambda args: self.endpoints[self.sys_about_topic].publish(payload=self.produce_about()),
+                service=self,
                 description="Get information about the Service.",
                 payload_schema={}),
-            sys_about_topic: PubEndpoint(
-                topic=sys_about_topic,
+            self.sys_about_topic: PubEndpoint(
+                topic=self.sys_about_topic,
                 description="Emit information about the Service.",
-                payload_schema={}),
+                payload_schema={},
+                service=self,
+                default_qos=1,
+                default_retain=True),
+            self.sys_notice_topic: PubEndpoint(
+                topic=self.sys_notice_topic,
+                description="Emit a notice about the Service.",
+                payload_schema={},
+                service=self,
+                default_qos=1,
+                default_retain=False)
         }
         # -Channels-
         self.channels: Dict[str, Channel] = {}
         # -Logger-
         self.logger: Logger = logger or getLogger(self.id)
+        if emit_logs_as_notices:
+            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.endpoints[self.sys_notice_topic]))
         # -MQTT Client-
         self.client: mqtt.Client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, 
@@ -85,33 +107,33 @@ class Service():
         )
 
 
-    @classmethod
-    def from_dict(cls, service_dict: Dict, create_channels: bool = False) -> "Service":
-        """
-        Initialize a Lynx Service object from a dictionary.
-        """
-        if create_channels:
-            channels = {{id: Channel.from_dict(channel_dict)} for id, channel_dict in service_dict["channels"].items()}
-        else:
-            channels = {}
+    # @classmethod
+    # def from_dict(cls, service_dict: Dict, create_channels: bool = False) -> "Service":
+    #     """
+    #     Initialize a Lynx Service object from a dictionary.
+    #     """
+    #     if create_channels:
+    #         channels = {{id: Channel.from_dict(channel_dict)} for id, channel_dict in service_dict["channels"].items()}
+    #     else:
+    #         channels = {}
 
-        return cls(
-            id=service_dict["id"],
-            title=service_dict["title"],
-            description=service_dict["description"],
-            lynx_version=service_dict["lynx_version"],
-            time_source=service_dict["time_source"],
-            # TODO: Implement Endpoint.from_dict
-            endpoints={{id: Endpoint.from_dict(endpoint_dict)} for id, endpoint_dict in service_dict["endpoints"].items()},
-            channels=channels
-        )
+    #     return cls(
+    #         id=service_dict["id"],
+    #         title=service_dict["title"],
+    #         description=service_dict["description"],
+    #         lynx_version=service_dict["lynx_version"],
+    #         time_source=service_dict["time_source"],
+    #         # TODO: Implement Endpoint.from_dict
+    #         endpoints={{id: Endpoint.from_dict(endpoint_dict)} for id, endpoint_dict in service_dict["endpoints"].items()},
+    #         channels=channels
+    #     )
 
 
-    def add_channel(self, channel: Channel):
-        """
-        Add a channel to the service.
-        """
-        self.channels[channel.id] = channel
+    # def add_channel(self, channel: Channel):
+    #     """
+    #     Add a channel to the service.
+    #     """
+    #     self.channels[channel.id] = channel
 
 
     def new_poll_channel(
@@ -122,7 +144,7 @@ class Service():
         output_data_schema: Optional[Dict] = None,
         time_source: Optional[TimeSource] = None):
         """
-        Create a new poll channel for the service.
+        Create a new channel with a poll callback for the service.
         """
 
         if time_source is None:
@@ -152,7 +174,7 @@ class Service():
         output_data_schema: Optional[Dict] = None,
         time_source: Optional[TimeSource] = None):
         """
-        Create a new stream channel for the service.
+        Create a new channel with a start stream callback for the service.
         """
 
         if time_source is None:
@@ -174,11 +196,11 @@ class Service():
         return decorator
     
 
-    def add_endpoint(self, endpoint: Endpoint):
-        """
-        Add an endpoint to the service.
-        """
-        self.endpoints[endpoint.topic] = endpoint
+    # def add_endpoint(self, endpoint: Endpoint):
+    #     """
+    #     Add an endpoint to the service.
+    #     """
+    #     self.endpoints[endpoint.topic] = endpoint
     
 
     def no_endpoint_message(self, client, userdata, message):
@@ -196,19 +218,26 @@ class Service():
         self.client.subscribe(f"{self.id}/#")
     
 
-    def publish_using_endpoint(self, endpoint:PubEndpoint, payload:Dict, qos:Optional[int]=None, retain:Optional[bool]=None):
+    def publish_using_endpoint(
+        self, 
+        endpoint:PubEndpoint, 
+        payload:Dict, 
+        qos:int, 
+        retain:bool,
+        properties: Dict[str, str] = {}) -> Optional[mqtt.MQTTMessage]:
         """
         Publish a payload using an endpoint.
         """
         #TODO: Add validation of payload
-        qos = qos or endpoint.default_qos
-        retain = retain or endpoint.default_retain
-        
+
         publish_properties = Properties(PacketTypes.PUBLISH)
         publish_time = self.time_source.get_time()
-        publish_properties.UserProperty = ("sec", str(publish_time['sec']))
-        publish_properties.UserProperty = ("nsec", str(publish_time['nsec']))
-        self.client.publish(
+        for key, value in properties.items():
+            publish_properties.UserProperty = (key, value)
+        if "sec" not in properties and "nsec" not in properties:
+            publish_properties.UserProperty = ("sec", str(publish_time['sec']))
+            publish_properties.UserProperty = ("nsec", str(publish_time['nsec']))
+        return self.client.publish(
             topic=endpoint.topic,
             payload=orjson.dumps(payload),
             qos=qos,
