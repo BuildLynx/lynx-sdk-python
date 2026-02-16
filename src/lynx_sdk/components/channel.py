@@ -20,7 +20,15 @@ import sys
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
-from lynx_sdk.singletons.time_source import TimeSource
+from lynx_sdk.models.endpoint_args import \
+    GET_ABOUT_ENDPOINT_ARGS, \
+    SYS_ABOUT_ENDPOINT_ARGS, \
+    SYS_NOTICE_ENDPOINT_ARGS, \
+    CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
+    CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \
+    CHANNEL_CMD_STOP_ENDPOINT_ARGS, \
+    CHANNEL_OUT_DATA_ENDPOINT_ARGS
+from lynx_sdk.models.time_source import TimeSource
 from lynx_sdk.utils.json_tools import validate_json_schema, generate_full_data_schema
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.models.notice import LoggingNoticeHandler
@@ -34,78 +42,6 @@ import jsonschema
 
 
 # === CONSTANTS ===
-
-COMMAND_POLL_PAYLOAD_SCHEMA = {
-    "numSamples": {
-        "title": "Number of Samples",
-        "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
-        "default": 0,
-        "type": "integer",
-        "minimum": 0
-    },
-    "interval": {
-        "title": "Sample Interval",
-        "description": "Seconds between samples",
-        "default": 1.0,
-        "type": "number",
-        "minimum": 0
-    },
-    "include": {
-        "title": "Values to Include",
-        "description": "Default everything to true if empty",
-        "default": {},
-        "type": "object"
-    },
-    "paginate": {
-        "title": "Paginate",
-        "description": "0 for no pagination, positive int for page size, default 0",
-        "default": 0,
-        "type": "integer",
-        "minimum": 0
-    }
-}
-
-COMMAND_STREAM_PAYLOAD_SCHEMA = {
-    "numSamples": {
-        "title": "Number of Samples",
-        "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
-        "default": 0,
-        "type": "integer",
-        "minimum": 0
-    },
-    "include": {
-        "title": "Values to Include",
-        "description": "Default everything to true if empty",
-        "default": {},
-        "type": "object"
-    },
-    "paginate": {
-        "title": "Paginate",
-        "description": "0 for no pagination, positive int for page size, default 0",
-        "default": 0,
-        "type": "integer",
-        "minimum": 0
-    }
-}
-
-OUTPUT_DATA_PAYLOAD_SCHEMA = {
-    "sec": {
-        "title": "Seconds",
-        "description": "Seconds since the start of the channel",
-        "type": "integer"
-    },
-    "nsec": {
-        "title": "Nanoseconds",
-        "description": "Nanoseconds since the start of the channel",
-        "type": "integer"
-    },
-    "data": {
-        "title": "Data",
-        "description": "The data from the channel",
-        "type": "object",
-        "properties": {}
-    }
-}
 
 
 
@@ -122,6 +58,7 @@ OUTPUT_DATA_PAYLOAD_SCHEMA = {
 class ChannelState(Enum):
     BUSY = "busy"
     IDLE = "idle"
+    DISCONNECTED = "disconnected"
     DISABLED = "disabled"
 
 
@@ -142,7 +79,7 @@ class Channel(Component):
         output_data_schema: Optional[Dict] = None,
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
-        emit_logs_as_notices: Optional[bool] = None,
+        publish_logs_as_notices: Optional[bool] = None,
         logger: Optional[logging.Logger] = None):
         """
         Initialize a Lynx Channel object.
@@ -168,8 +105,8 @@ class Channel(Component):
         if time_source is None:
             time_source = service.time_source
         
-        if emit_logs_as_notices is None:
-            emit_logs_as_notices = service.emit_logs_as_notices
+        if publish_logs_as_notices is None:
+            publish_logs_as_notices = service.publish_logs_as_notices
         
         # Initialize Component base class with channel-specific logger
         if logger is None:
@@ -188,8 +125,9 @@ class Channel(Component):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            emit_logs_as_notices=service.emit_logs_as_notices,
-            client=service.client
+            publish_logs_as_notices=publish_logs_as_notices,
+            client=service.client,
+            topic_prefix=f"{service.id}/{id}"
         )
         
         # -Channel-specific initialization-
@@ -199,60 +137,31 @@ class Channel(Component):
         self.last_payload: Dict = {}
 
         # -Endpoints-
-        self.sys_about_endpoint = PubEndpoint(
-            topic=f"{self.service.id}/{self.id}/@/About",
-            component=self,
-            payload_schema={},
-            description="Emit information about the Channel.")
-        self.endpoints[self.sys_about_endpoint.topic] = self.sys_about_endpoint
-        
-        self.get_about_endpoint = SubEndpoint(
-            topic=f"{self.service.id}/{self.id}/?/About",
-            handler=lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()),
-            component=self,
-            payload_schema={},
-            description="Get information about the Channel.")
-        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
+        self.get_about_endpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
+            lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
+        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SYS_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
 
         if isinstance(poll_function, Callable):
-            poll_topic = f"{self.service.id}/{self.id}/!/Poll"
-            self.endpoints[poll_topic] = SubEndpoint(
-                topic=poll_topic,
-                handler=self.poll_handler,
-                component=self,
-                payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA,
-                description="Poll the channel for data.",
-                allow_run_while_busy=False)
+            self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
+                self.poll_handler)
 
         if isinstance(start_stream_function, Callable):
-            stream_topic = f"{self.service.id}/{self.id}/!/Stream"
-            self.endpoints[stream_topic] = SubEndpoint(
-                topic=stream_topic,
-                handler=self.stream_handler,
-                component=self,
-                payload_schema=COMMAND_STREAM_PAYLOAD_SCHEMA,
-                description="Start the Channel's data stream.")
+            self.cmd_stream_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STREAM_ENDPOINT_ARGS,
+                self.stream_handler)
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
-            stop_topic = f"{self.service.id}/{self.id}/!/Stop"
-            self.endpoints[stop_topic] = SubEndpoint(
-                topic=stop_topic,
-                handler=self.stop,
-                component=self,
-                payload_schema={},
-                description="Stop the channel.")
+            self.cmd_stop_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STOP_ENDPOINT_ARGS,
+                self.stop_handler)
 
         if output_data_schema is not None:
-            output_data_topic = f"{self.service.id}/{self.id}/<"
-            self.endpoints[output_data_topic] = PubEndpoint(
-                topic=output_data_topic,
-                component=self,
-                payload_schema=generate_full_data_schema(output_data_schema),
-                description="Output data")
+            channel_out_data_schema = CHANNEL_OUT_DATA_ENDPOINT_ARGS.copy()
+            channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
+            self.out_data_endpoint = self.new_endpoint(PubEndpoint, channel_out_data_schema)
         
         # -Setup logging with notices-
-        if self.emit_logs_as_notices:
-            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.service.sys_notice_endpoint))
+        if self.publish_logs_as_notices:
+            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
     @classmethod
@@ -305,16 +214,13 @@ class Channel(Component):
         """
         num_samples = payload.get("numSamples", 1)
         interval = payload.get("interval", 0)
-        include = payload.get("include", True)
+        contents = payload.get("contents", True)
         start_time = self.time_source.get_time()
         data_list = []
         poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, data_list))
         poll_thread.start()
         poll_thread.join()
-        # for data in data_list:
-        #     self.output_data_schema.validate(data)
-        #     self.output_data_schema.publish(data)
-        self.endpoints[f"{self.service.id}/{self.id}/<"].publish(payload=data_list)
+        self.out_data_endpoint.publish(payload=data_list)
 
 
     def stream_handler(self, message: mqtt.MQTTMessage):
@@ -332,7 +238,7 @@ class Channel(Component):
         pass
 
 
-    def stop(self):
+    def stop_handler(self):
         """
         Stop the channel.
         """
@@ -343,20 +249,7 @@ class Channel(Component):
         """
         Produce a dictionary of information about the channel.
         """
-        return {
-            "type": "channel",
-            "docs": {
-                "title": self.title,
-                "description": self.description,
-                "lynx_version": self.lynx_version,
-                "time_source": self.time_source.time_source_type.value,
-            },
-            "config": {},
-            "status": {},
-            "endpoints": {
-                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
-            },
-        }
+        return super().produce_about()
 # === MAIN LOOP ===
 
 

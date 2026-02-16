@@ -8,23 +8,28 @@ a Time Source, an MQTT Client, and has its own Endpoints.
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import List, Dict, Callable, Any, Optional
+from typing import List, Dict, Callable, Any, Optional, Type
 from dataclasses import dataclass
 import logging
 import sys
 import time
+from copy import deepcopy
 
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.utils.mqtt_client import MqttClient
-from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
-from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint, PubEndpoint
+from lynx_sdk.models.time_source import TimeSource, instantiate_ideal_time_source
+from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
+from lynx_sdk.models.endpoint_args import \
+    GET_ABOUT_ENDPOINT_ARGS, \
+    SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
+    SYS_NOTICE_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
 
 # -External Imports-
-from paho.mqtt.properties import Properties
+import paho.mqtt.client as mqtt
 
 
 # === CONSTANTS ===
@@ -55,7 +60,7 @@ class Service(Component):
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
         logger: Optional[logging.Logger] = None,
-        emit_logs_as_notices: bool = True):
+        publish_logs_as_notices: bool = True):
         """
         Initialize a Lynx Service object.
         
@@ -66,7 +71,7 @@ class Service(Component):
             lynx_version: Lynx protocol version
             time_source: Time source for timestamps (defaults to ideal source for platform)
             logger: Logger for this service (defaults to logger named after id)
-            emit_logs_as_notices: Whether to publish log messages as notices to MQTT
+            publish_logs_as_notices: Whether to publish log messages as notices to MQTT
         """
 
         if time_source is None:
@@ -94,43 +99,23 @@ class Service(Component):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            emit_logs_as_notices=emit_logs_as_notices,
-            client=self.client
+            publish_logs_as_notices=publish_logs_as_notices,
+            client=self.client,
+            topic_prefix=id
         )
         
         # -Service-specific initialization-
         # -Channels-
         self.channels: Dict[str, Channel] = {}
         
-        # -Endpoints-        
-        self.get_about_endpoint = PubEndpoint(
-            topic=f"{self.id}/@/About",
-            component=self,
-            payload_schema={},
-            description="Emit information about the Service.",
-            default_qos=1,
-            default_retain=True)
-        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
-        
-        self.get_about_endpoint = SubEndpoint(
-            topic=f"{self.id}/?/About",
-            handler=lambda args: self.get_about_endpoint.publish(payload=self.produce_about()),
-            component=self,
-            payload_schema={},
-            description="Get information about the Service.")
-        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
-        
-        self.sys_notice_endpoint = PubEndpoint(
-            topic=f"{self.id}/@/Notice",
-            component=self,
-            payload_schema={},
-            description="Emit a notice about the Service.",
-            default_qos=1,
-            default_retain=False)
-        self.endpoints[self.sys_notice_endpoint.topic] = self.sys_notice_endpoint
+        # -Endpoints-
+        self.get_about_endpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
+            lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
+        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
         
         # -Setup logging with notices-
-        if emit_logs_as_notices:
+        if publish_logs_as_notices:
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
@@ -192,23 +177,23 @@ class Service(Component):
             self.channels[id] = new_channel
             return new_channel
         return decorator
-    
 
 
-    def no_endpoint_message(self, client, userdata, message):
+    def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
         """
-        Emit a notice that the service received a message on an endpoint that is not configured.
+        Publish a notice that the service received a message on an endpoint that is not configured.
         """
         if message.topic in self.all_endpoint_topics_set:
             return
         self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
 
 
-    def on_connect(self, client, userdata: Any, flags: Dict, reason_code: int, properties: Properties):
+    def on_connect(self, client: mqtt.Client, userdata: Any, flags: Dict, reason_code: int, properties: mqtt.Properties):
         """
         Callback for when the client connects to the MQTT broker.
         """
-        self.logger.info(f"Connected to MQTT broker with result code {reason_code}")
+        self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
+        self.sys_about_endpoint.publish(payload=self.produce_about())
         self.client.subscribe(f"{self.id}/#")
 
 

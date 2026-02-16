@@ -20,6 +20,7 @@ from lynx_sdk.utils.json_tools import validate_json_object
 # -External Imports-
 import paho.mqtt.client as mqtt
 import orjson
+import jsonschema
 
 
 
@@ -86,9 +87,11 @@ class Endpoint:
         """
         Validate a payload dictionary against a JSON schema.
         """
-        if not validate_json_object(payload_dict, self.payload_schema):
-            error_msg = f"Payload validation failed for endpoint '{self.topic}'"
-            self.component.logger.warning(f"{error_msg}. Payload: {payload_dict}")
+        try:
+            validate_json_object(payload_dict, self.payload_schema)
+        except jsonschema.exceptions.ValidationError as e:
+            raise ValueError(f"JSON object validation failed: {e.message}")
+            
     
 
     def produce_about(self) -> Dict:
@@ -164,18 +167,18 @@ class SubEndpoint(Endpoint):
             
             # Parse JSON bytes to dictionary
             try:
-                payload_dict: Dict = orjson.loads(message.payload)
+                payload: Dict = orjson.loads(message.payload)
             except orjson.JSONDecodeError as e:
                 self.component.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
                 raise ValueError(f"Invalid JSON payload: {e}") from e
             
             # Validate payload against schema if schema exists
-            if self.payload_schema is not None and len(payload_dict) > 0:
-                self.validate_payload(payload_dict)
+            if self.payload_schema is not None and len(payload) > 0:
+                self.validate_payload(payload)
 
             # Call the handler with the parsed dictionary
             try:
-                return self.handler(payload_dict)
+                return self.handler(payload)
             except Exception as e:
                 self.component.logger.exception(
                     f"Handler exception for endpoint '{self.topic}': "
@@ -195,7 +198,8 @@ class PubEndpoint(Endpoint):
         payload_schema: object,
         description: str = "",
         default_qos: int = 0,
-        default_retain: bool = False):
+        default_retain: bool = False,
+        validate_payload: bool = True):
         """
         Initialize a Lynx Publish Endpoint object.
         
@@ -240,7 +244,8 @@ class PubEndpoint(Endpoint):
         if retain is None:
             retain = self.default_retain
         
-        # TODO: Add payload validation against schema
+        if self.validate_payload and self.payload_schema is not None and len(payload) > 0:
+            self.validate_payload(payload)
         
         return self.component.client.publish(
             topic=self.topic,

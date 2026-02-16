@@ -31,32 +31,32 @@ if TYPE_CHECKING:
 # === FUNCTIONS ===
 
 # -JSON Payload Tools-
-def trim_payload_by_include(
+def trim_payload_by_contents(
     payload: Dict,
-    include: Dict | List | bool = True) -> Any:
+    contents: Dict | List | bool = True) -> Any:
     """
-    Recursively build a JSON dict by trimming a superset dict by a dict of keys to include.
+    Recursively build a JSON dict by trimming a superset dict by a dict of keys to contents.
     """
     try:
         # -Boolean cases-
-        if include is True:
+        if contents is True:
             return payload
-        elif include is False:
+        elif contents is False:
             return None
         # -List case-
-        elif isinstance(include, List) and len(include) > 0: # Have to dig one level deeper in payload if it's an array
+        elif isinstance(contents, List) and len(contents) > 0: # Have to dig one level deeper in payload if it's an array
             if isinstance(payload, List) and len(payload) > 0:
-                return [trim_payload_by_include(item, include[0]) for item in payload]
+                return [trim_payload_by_contents(item, contents[0]) for item in payload]
             else:
                 return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected List.")
         # -Dict case-
-        elif isinstance(include, Dict):
+        elif isinstance(contents, Dict):
             if isinstance(payload, Dict) and len(payload) > 0:
-                return {key: trim_payload_by_include(payload[key], include[key]) for key in include.keys()}
+                return {key: trim_payload_by_contents(payload[key], contents[key]) for key in contents.keys()}
             else:
                 return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected Dict.")
         else:
-            raise PayloadBuildingError(f"Invalid type in \"Include\" object: {type(include)}. Expected Dict, List, or bool.")
+            raise PayloadBuildingError(f"Invalid type in \"contents\" object: {type(contents)}. Expected Dict, List, or bool.")
     except KeyError as e:
         raise PayloadBuildingError(f"Error building payload: {e}")
 
@@ -67,11 +67,12 @@ def generate_full_data_schema(
     additional_properties: bool = False,
     jsonschema_version: str = "http://json-schema.org/draft-07/schema#") -> Optional[Dict]:
     """
-    Generate a full data schema for the channel.
+    If the provided "schema" is not yet a real JSON schema object that has a "type" key, 
+    this function will wrap it in an object with a "type" key and a "properties" key.
     """
     if output_data_schema is None:
         return None
-    if "$schema" in output_data_schema and output_data_schema["$schema"] == jsonschema_version:
+    if "type" in output_data_schema:
         return output_data_schema
     else:
         return {
@@ -110,11 +111,7 @@ def validate_json_object(
     json_schema = generate_full_data_schema(json_schema)
     if validator is None:
         validator = jsonschema.Draft7Validator(json_schema)
-    try:
-        validator.validate(json_object)
-    except jsonschema.exceptions.ValidationError as e:
-        raise ValueError(f"JSON object validation failed: {e.message}")
-    return True
+    validator.validate(json_object)
 
 
 def validate_json_schema(

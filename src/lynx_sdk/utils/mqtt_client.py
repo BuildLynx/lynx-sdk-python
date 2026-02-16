@@ -10,7 +10,7 @@ MQTT Client wrapper for Lynx. Provides a unified interface for MQTT operations.
 from typing import Dict, Optional, Any, Callable
 
 # -Lynx Imports-
-from lynx_sdk.singletons.time_source import TimeSource
+from lynx_sdk.models.time_source import TimeSource
 
 # -External Imports-
 import paho.mqtt.client as mqtt

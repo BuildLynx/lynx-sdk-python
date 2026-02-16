@@ -9,14 +9,16 @@ Both Service and Channel inherit from Component.
 
 # -stdlib Imports-
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
-from logging import Logger, getLogger
+from typing import Dict, Optional, Type, Callable
+from logging import Logger
 from enum import Enum
+from copy import deepcopy
 
 # -Lynx Imports-
-from lynx_sdk.models.endpoint import Endpoint
-from lynx_sdk.singletons.time_source import TimeSource
+from lynx_sdk.models.endpoint import Endpoint, SubEndpoint
+from lynx_sdk.models.time_source import TimeSource
 from lynx_sdk.utils.mqtt_client import MqttClient
+from lynx_sdk.utils.datastructures import deep_merge
 
 # -External Imports-
 
@@ -63,10 +65,11 @@ class Component(ABC):
         title: str,
         description: str,
         lynx_version: str,
-        time_source: TimeSource,
+        time_source: Optional[TimeSource],
         logger: Logger,
-        emit_logs_as_notices: bool,
-        client: MqttClient):
+        publish_logs_as_notices: bool,
+        client: MqttClient,
+        topic_prefix: str):
         """
         Initialize a Lynx Component.
         
@@ -78,16 +81,20 @@ class Component(ABC):
             lynx_version: Lynx protocol version this component uses
             time_source: Time source for timestamps (None if component doesn't need one)
             logger: Logger for this component (defaults to logger named after id)
+            publish_logs_as_notices: Whether to publish log messages as Notices to MQTT
+            client: MQTT client for this component
+            topic_prefix: Prefix for the topics of the component (e.g. "service_id/channel_id")
         """
         self.id: str = id
         self.component_type: ComponentType = component_type
         self.title: str = title
         self.description: str = description
         self.lynx_version: str = lynx_version
-        self.time_source: TimeSource = time_source
+        self.time_source: Optional[TimeSource] = time_source
         self.logger: Logger = logger
-        self.emit_logs_as_notices: bool = emit_logs_as_notices,
+        self.publish_logs_as_notices: bool = publish_logs_as_notices,
         self.client: MqttClient = client
+        self.topic_prefix: str = topic_prefix
         self.endpoints: Dict[str, Endpoint] = {}
     
     
@@ -108,17 +115,17 @@ class Component(ABC):
             - endpoints: Dictionary of endpoint information
         """
         about_dict = {
-            "type": self.component_type.value.lower(),
             "docs": {
+                "id": self.id,
                 "title": self.title,
                 "description": self.description,
                 "lynx_version": self.lynx_version,
+                "type": self.component_type.value.lower(),
             },
             "config": {},
             "status": {},
             "endpoints": {
-                endpoint.topic: endpoint.produce_about() 
-                for endpoint in self.endpoints.values()
+                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             }
         }
         
@@ -127,6 +134,23 @@ class Component(ABC):
             about_dict["docs"]["time_source"] = self.time_source.time_source_type.value
         
         return about_dict
+    
+    
+    def new_endpoint(self, 
+        endpoint_class: Type[Endpoint], 
+        endpoint_args: Dict, 
+        sub_handler: Optional[Callable] = None) -> Endpoint:
+        """
+        Create a new endpoint for the service from a dictionary of arguments. 
+        """
+        endpoint_args = endpoint_args.copy()
+        endpoint_args["component"] = self
+        endpoint_args["topic"] = self.topic_prefix + endpoint_args["topic"]
+        if issubclass(endpoint_class, SubEndpoint):
+            endpoint_args["handler"] = sub_handler
+        endpoint = endpoint_class(**endpoint_args)
+        self.endpoints[endpoint.topic] = endpoint
+        return endpoint
 
 
 # === MAIN LOOP ===
