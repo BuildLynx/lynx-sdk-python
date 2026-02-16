@@ -58,8 +58,8 @@ class LoggingNoticeHandler(logging.Handler):
     A logging.Handler (from Python's logging module) that publishes notices to MQTT using a Lynx Service.
     """
 
-    def __init__(self, endpoint: PubEndpoint, min_level: int = 0):
-        super().__init__(level=min_level)
+    def __init__(self, endpoint: PubEndpoint, min_level: NoticeSeverity = NoticeSeverity.INFO):
+        super().__init__(level=min_level.value)
         self.endpoint: PubEndpoint = endpoint
 
 

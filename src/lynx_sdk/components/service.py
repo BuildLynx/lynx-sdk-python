@@ -10,13 +10,14 @@ a Time Source, an MQTT Client, and has its own Endpoints.
 # -stdlib Imports-
 from typing import List, Dict, Callable, Any, Optional
 from dataclasses import dataclass
-from logging import Logger, getLogger
+import logging
+import sys
 import time
 
 # -Lynx Imports-
-from lynx_sdk.components.component import Component
+from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.components.channel import Channel
-from lynx_sdk.utils.structures import LYNX_VERSION, ComponentType
+from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.utils.mqtt_client import MqttClient
 from lynx_sdk.singletons.time_source import TimeSource, instantiate_ideal_time_source
 from lynx_sdk.models.endpoint import Endpoint, LynxEndpointDirection, SubEndpoint, PubEndpoint
@@ -53,7 +54,7 @@ class Service(Component):
         description: str = "",
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
-        logger: Optional[Logger] = None,
+        logger: Optional[logging.Logger] = None,
         emit_logs_as_notices: bool = True):
         """
         Initialize a Lynx Service object.
@@ -71,7 +72,18 @@ class Service(Component):
         if time_source is None:
             time_source = instantiate_ideal_time_source()
         if logger is None:
-            logger = getLogger(id)
+            logger: logging.Logger = logging.getLogger(id)
+            logger.setLevel(level=logging.DEBUG)
+            stream_handler = logging.StreamHandler(stream=sys.stdout)
+            stream_handler.setLevel(level=logging.DEBUG)
+            logger.addHandler(stream_handler)
+            logger.propagate = False
+        
+        # -MQTT Client-
+        self.client: MqttClient = MqttClient(
+            client_id=id,
+            time_source=time_source
+        )
 
         # Initialize Component base class
         super().__init__(
@@ -82,55 +94,44 @@ class Service(Component):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            emit_logs_as_notices=emit_logs_as_notices
+            emit_logs_as_notices=emit_logs_as_notices,
+            client=self.client
         )
         
         # -Service-specific initialization-
         # -Channels-
         self.channels: Dict[str, Channel] = {}
         
-        # -MQTT Client-
-        self.client: MqttClient = MqttClient(
-            client_id=self.id,
-            time_source=self.time_source
-        )
-        
-        # -Endpoints-
-        self.get_about_endpoint: SubEndpoint = SubEndpoint(
-            topic=f"{self.id}/?/About",
-            description="Get information about the Service.",
-            handler=lambda args: self.endpoints[self.sys_about_endpoint.topic].publish(payload=self.produce_about()),
-            mqtt_client=self.client,
-            time_source=self.time_source,
-            logger=self.logger,
-            payload_schema={})
-        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
-
-        self.sys_about_endpoint: PubEndpoint = PubEndpoint(
+        # -Endpoints-        
+        self.get_about_endpoint = PubEndpoint(
             topic=f"{self.id}/@/About",
-            description="Emit information about the Service.",
-            mqtt_client=self.client,
-            time_source=self.time_source,
-            logger=self.logger,
+            component=self,
             payload_schema={},
+            description="Emit information about the Service.",
             default_qos=1,
             default_retain=True)
-        self.endpoints[self.sys_about_endpoint.topic] = self.sys_about_endpoint
-
-        self.sys_notice_endpoint: PubEndpoint = PubEndpoint(
-            topic=f"{self.id}/@/Notice",
-            description="Emit a notice about the Service.",
-            mqtt_client=self.client,
-            time_source=self.time_source,
-            logger=self.logger,
+        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
+        
+        self.get_about_endpoint = SubEndpoint(
+            topic=f"{self.id}/?/About",
+            handler=lambda args: self.get_about_endpoint.publish(payload=self.produce_about()),
+            component=self,
             payload_schema={},
+            description="Get information about the Service.")
+        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
+        
+        self.sys_notice_endpoint = PubEndpoint(
+            topic=f"{self.id}/@/Notice",
+            component=self,
+            payload_schema={},
+            description="Emit a notice about the Service.",
             default_qos=1,
             default_retain=False)
         self.endpoints[self.sys_notice_endpoint.topic] = self.sys_notice_endpoint
         
         # -Setup logging with notices-
         if emit_logs_as_notices:
-            self.logger.addHandler(LoggingNoticeHandler(self.sys_notice_endpoint))
+            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
     def new_poll_channel(
@@ -198,6 +199,8 @@ class Service(Component):
         """
         Emit a notice that the service received a message on an endpoint that is not configured.
         """
+        if message.topic in self.all_endpoint_topics_set:
+            return
         self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
 
 
@@ -226,6 +229,12 @@ class Service(Component):
         Start the service and MQTT Client.
         """
         
+        # All endpoint topics set is for making sure that service.no_endpoint_message() does not handle 
+        # incoming messages on topics that it publishes to, which would cause an infinite loop.
+        self.all_endpoint_topics_set: set[str] = set[str](self.endpoints.keys())
+        for channel in self.channels.values():
+            self.all_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
+
         # Set default callbacks
         self.client.set_on_message(self.no_endpoint_message)
         self.client.set_on_connect(self.on_connect)

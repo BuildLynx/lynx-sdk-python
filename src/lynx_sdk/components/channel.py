@@ -9,20 +9,22 @@ Channel class for Lynx. A Channel is the encapsulation of a single input and/or 
 # -stdlib Imports-
 from __future__ import annotations
 from typing import Callable, Dict, List, Any, Optional, TYPE_CHECKING
-from dataclasses import dataclass
 import threading
 import time
 import itertools
 import copy
 from enum import Enum
-from logging import getLogger, Logger
+import logging
+import sys
 
 # -Lynx Imports-
-from lynx_sdk.components.component import Component
+from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
 from lynx_sdk.singletons.time_source import TimeSource
-from lynx_sdk.utils.json_tools import validate_json_schema
-from lynx_sdk.utils.structures import LYNX_VERSION, ComponentType
+from lynx_sdk.utils.json_tools import validate_json_schema, generate_full_data_schema
+from lynx_sdk.utils.structures import LYNX_VERSION
+from lynx_sdk.models.notice import LoggingNoticeHandler
+
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
 
@@ -113,17 +115,6 @@ OUTPUT_DATA_PAYLOAD_SCHEMA = {
 
 # === FUNCTIONS ===
 
-def generate_full_data_schema(output_data_schema: Optional[Dict]=None) -> Optional[Dict]:
-    """
-    Generate a full data schema for the channel.
-    """
-    if output_data_schema is None:
-        return None
-    else:
-        full_output_data_schema: Dict = copy.deepcopy(OUTPUT_DATA_PAYLOAD_SCHEMA)
-        full_output_data_schema["data"]["properties"] = output_data_schema
-        return full_output_data_schema
-
 
 
 # === CLASSES ===
@@ -151,7 +142,8 @@ class Channel(Component):
         output_data_schema: Optional[Dict] = None,
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
-        logger: Optional[Logger] = None):
+        emit_logs_as_notices: Optional[bool] = None,
+        logger: Optional[logging.Logger] = None):
         """
         Initialize a Lynx Channel object.
         
@@ -176,10 +168,17 @@ class Channel(Component):
         if time_source is None:
             time_source = service.time_source
         
+        if emit_logs_as_notices is None:
+            emit_logs_as_notices = service.emit_logs_as_notices
+        
         # Initialize Component base class with channel-specific logger
         if logger is None:
-            logger = getLogger(f"{service.id}.{id}")
-            
+            logger: logging.Logger = logging.getLogger(f"{service.id}.{id}")
+            logger.setLevel(level=logging.DEBUG)
+            stream_handler = logging.StreamHandler(stream=sys.stdout)
+            stream_handler.setLevel(level=logging.DEBUG)
+            logger.addHandler(stream_handler)
+            logger.propagate = False
         
         super().__init__(
             id=id,
@@ -189,7 +188,8 @@ class Channel(Component):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            emit_logs_as_notices=service.emit_logs_as_notices
+            emit_logs_as_notices=service.emit_logs_as_notices,
+            client=service.client
         )
         
         # -Channel-specific initialization-
@@ -199,70 +199,60 @@ class Channel(Component):
         self.last_payload: Dict = {}
 
         # -Endpoints-
-        self.get_about_endpoint: SubEndpoint = SubEndpoint(
-            topic=f"{self.service.id}/{self.id}/?/About",
-            description="Get information about the Channel.",
-            handler=lambda args: self.endpoints[self.sys_about_endpoint.topic].publish(payload=self.produce_about()),
-            mqtt_client=self.service.client,
-            time_source=self.time_source,
-            logger=self.logger,
-            payload_schema={})
-        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
-
-        self.sys_about_endpoint: PubEndpoint = PubEndpoint(
+        self.sys_about_endpoint = PubEndpoint(
             topic=f"{self.service.id}/{self.id}/@/About",
-            description="Emit information about the Channel.",
-            mqtt_client=self.service.client,
-            time_source=self.time_source,
-            logger=self.logger,
+            component=self,
             payload_schema={},
-            default_qos=1,
-            default_retain=True)
+            description="Emit information about the Channel.")
         self.endpoints[self.sys_about_endpoint.topic] = self.sys_about_endpoint
+        
+        self.get_about_endpoint = SubEndpoint(
+            topic=f"{self.service.id}/{self.id}/?/About",
+            handler=lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()),
+            component=self,
+            payload_schema={},
+            description="Get information about the Channel.")
+        self.endpoints[self.get_about_endpoint.topic] = self.get_about_endpoint
 
         if isinstance(poll_function, Callable):
             poll_topic = f"{self.service.id}/{self.id}/!/Poll"
             self.endpoints[poll_topic] = SubEndpoint(
                 topic=poll_topic,
-                description="Poll the channel for data.",
                 handler=self.poll_handler,
-                mqtt_client=self.service.client,
-                time_source=self.time_source,
-                logger=self.logger,
+                component=self,
                 payload_schema=COMMAND_POLL_PAYLOAD_SCHEMA,
+                description="Poll the channel for data.",
                 allow_run_while_busy=False)
 
         if isinstance(start_stream_function, Callable):
             stream_topic = f"{self.service.id}/{self.id}/!/Stream"
             self.endpoints[stream_topic] = SubEndpoint(
                 topic=stream_topic,
-                description="Start the Channel's data stream.",
                 handler=self.stream_handler,
-                mqtt_client=self.service.client,
-                time_source=self.time_source,
-                logger=self.logger,
-                payload_schema=COMMAND_STREAM_PAYLOAD_SCHEMA)
+                component=self,
+                payload_schema=COMMAND_STREAM_PAYLOAD_SCHEMA,
+                description="Start the Channel's data stream.")
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
             stop_topic = f"{self.service.id}/{self.id}/!/Stop"
             self.endpoints[stop_topic] = SubEndpoint(
                 topic=stop_topic,
-                description="Stop the channel.",
                 handler=self.stop,
-                mqtt_client=self.service.client,
-                time_source=self.time_source,
-                logger=self.logger,
-                payload_schema={})
+                component=self,
+                payload_schema={},
+                description="Stop the channel.")
 
         if output_data_schema is not None:
             output_data_topic = f"{self.service.id}/{self.id}/<"
             self.endpoints[output_data_topic] = PubEndpoint(
                 topic=output_data_topic,
-                description="Output data",
-                mqtt_client=self.service.client,
-                time_source=self.time_source,
-                logger=self.logger,
-                payload_schema=generate_full_data_schema(output_data_schema))
+                component=self,
+                payload_schema=generate_full_data_schema(output_data_schema),
+                description="Output data")
+        
+        # -Setup logging with notices-
+        if self.emit_logs_as_notices:
+            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.service.sys_notice_endpoint))
 
 
     @classmethod

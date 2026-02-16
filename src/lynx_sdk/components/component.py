@@ -11,14 +11,14 @@ Both Service and Channel inherit from Component.
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
 from logging import Logger, getLogger
+from enum import Enum
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint
 from lynx_sdk.singletons.time_source import TimeSource
-from lynx_sdk.utils.structures import LYNX_VERSION, ComponentType
+from lynx_sdk.utils.mqtt_client import MqttClient
 
 # -External Imports-
-
 
 
 # === CONSTANTS ===
@@ -34,6 +34,12 @@ from lynx_sdk.utils.structures import LYNX_VERSION, ComponentType
 
 
 #  === CLASSES ===
+
+class ComponentType(Enum):
+    NODE = "Node"
+    SERVICE = "Service"
+    CHANNEL = "Channel"
+
 
 class Component(ABC):
     """
@@ -59,7 +65,8 @@ class Component(ABC):
         lynx_version: str,
         time_source: TimeSource,
         logger: Logger,
-        emit_logs_as_notices: bool):
+        emit_logs_as_notices: bool,
+        client: MqttClient):
         """
         Initialize a Lynx Component.
         
@@ -79,7 +86,8 @@ class Component(ABC):
         self.lynx_version: str = lynx_version
         self.time_source: TimeSource = time_source
         self.logger: Logger = logger
-        self.emit_logs_as_notices: bool = emit_logs_as_notices
+        self.emit_logs_as_notices: bool = emit_logs_as_notices,
+        self.client: MqttClient = client
         self.endpoints: Dict[str, Endpoint] = {}
     
     

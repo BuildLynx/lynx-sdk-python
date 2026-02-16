@@ -7,6 +7,7 @@ This module provides tools for validating JSON objects and JSON schemas.
 # === IMPORTS ===
 
 # -stdlib Imports-
+import copy
 
 # -Lynx Imports-
 
@@ -61,6 +62,26 @@ def trim_payload_by_include(
 
 
 # -JSON Schema Tools-
+def generate_full_data_schema(
+    output_data_schema: Optional[Dict]=None,
+    additional_properties: bool = False,
+    jsonschema_version: str = "http://json-schema.org/draft-07/schema#") -> Optional[Dict]:
+    """
+    Generate a full data schema for the channel.
+    """
+    if output_data_schema is None:
+        return None
+    if "$schema" in output_data_schema and output_data_schema["$schema"] == jsonschema_version:
+        return output_data_schema
+    else:
+        return {
+            "$schema": jsonschema_version,
+            "type": "object",
+            "properties": output_data_schema,
+            "additionalProperties": additional_properties
+        }
+
+
 def wrap_json_in_object(
     json_dict: Dict
     ) -> Dict:
@@ -80,18 +101,19 @@ def wrap_json_in_object(
 def validate_json_object(
     json_object: Dict,
     json_schema: Dict,
-    validator: Optional["Validator"] = None,
-    additional_properties: bool = False
+    validator: Optional["Validator"] = None
     ) -> bool:
     """
     Validate a JSON object against a JSON schema. By default, it uses the Draft 7 validator.
     Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
     """
-    json_object = wrap_json_in_object(json_object)
-    json_schema = wrap_json_in_object(json_schema)
+    json_schema = generate_full_data_schema(json_schema)
     if validator is None:
         validator = jsonschema.Draft7Validator(json_schema)
-    validator.validate(json_object, additional_properties=additional_properties)
+    try:
+        validator.validate(json_object)
+    except jsonschema.exceptions.ValidationError as e:
+        raise ValueError(f"JSON object validation failed: {e.message}")
     return True
 
 

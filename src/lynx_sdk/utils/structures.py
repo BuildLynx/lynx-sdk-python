@@ -30,12 +30,6 @@ LYNX_VERSION = "A-01.01"
 
 #  === CLASSES ===
 
-class ComponentType(Enum):
-    CLIENT = "Client"
-    NODE = "Node"
-    SERVICE = "Service"
-    CHANNEL = "Channel"
-
 class QualityOfService(Enum):
     AT_LEAST_ONCE = 0
     AT_MOST_ONCE = 1

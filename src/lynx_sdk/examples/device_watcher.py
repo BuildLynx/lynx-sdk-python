@@ -82,7 +82,6 @@ service.channels["memory"] = memory_channel
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     # import json
     # import pprint
     # print(json.dumps(service.produce_about(), indent=2))
