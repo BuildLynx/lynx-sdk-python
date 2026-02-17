@@ -55,18 +55,6 @@ import jsonschema
 
 # === CLASSES ===
 
-class ChannelState(Enum):
-    BUSY = "busy"
-    IDLE = "idle"
-    DISCONNECTED = "disconnected"
-    DISABLED = "disabled"
-
-
-class ChannelStatus():
-    def __init__(self):
-        self.action: str = ""
-        self.state: ChannelState = ChannelState.IDLE
-
 
 class Channel(Component):
     def __init__(self,

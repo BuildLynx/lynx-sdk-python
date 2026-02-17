@@ -9,13 +9,13 @@ Both Service and Channel inherit from Component.
 
 # -stdlib Imports-
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, Callable
+from typing import Dict, Optional, Type, Callable, Any
 from logging import Logger
 from enum import Enum
 from copy import deepcopy
 
 # -Lynx Imports-
-from lynx_sdk.models.endpoint import Endpoint, SubEndpoint
+from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
 from lynx_sdk.models.time_source import TimeSource
 from lynx_sdk.utils.mqtt_client import MqttClient
 from lynx_sdk.utils.datastructures import deep_merge
@@ -41,6 +41,13 @@ class ComponentType(Enum):
     NODE = "Node"
     SERVICE = "Service"
     CHANNEL = "Channel"
+
+
+class ComponentState(Enum):
+    BUSY = "busy"
+    IDLE = "idle"
+    DISCONNECTED = "disconnected"
+    DISABLED = "disabled"
 
 
 class Component(ABC):
@@ -95,7 +102,12 @@ class Component(ABC):
         self.publish_logs_as_notices: bool = publish_logs_as_notices,
         self.client: MqttClient = client
         self.topic_prefix: str = topic_prefix
+
         self.endpoints: Dict[str, Endpoint] = {}
+        self._status: Dict[str, Any] = {
+            "state": ComponentState.IDLE,
+            "action": ""
+        }
     
     
     @abstractmethod
@@ -123,7 +135,7 @@ class Component(ABC):
                 "type": self.component_type.value.lower(),
             },
             "config": {},
-            "status": {},
+            "status": self.get_status(),
             "endpoints": {
                 endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             }
@@ -135,6 +147,40 @@ class Component(ABC):
         
         return about_dict
     
+
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get the status of the component.
+        """
+        return self._status
+    
+
+    def set_status(self, 
+        state: Optional[ComponentState] = None, 
+        action: Optional[str] = None, 
+        about_endpoint: Optional[PubEndpoint] = None) -> Dict[str, Any]:
+        """
+        Set the status of the component. 
+        Args:
+            state: The state of the component.
+            action: The action of the component.
+            about_endpoint: If provided, the status will be published to this endpoint. 
+                To not publish the status change, do not provide this argument.
+        Returns:
+            The status of the component.
+        """
+        changed_status = False
+        if state is not None and state != self._status["state"]:
+            self._status["state"] = state
+            changed_status = True
+        if action is not None and action != self._status["action"]:
+            self._status["action"] = action
+            changed_status = True
+        if changed_status and about_endpoint is not None:
+            # if self.type == ComponentType.SERVICE:
+            about_endpoint.publish(payload={})
+        return self._status
+
     
     def new_endpoint(self, 
         endpoint_class: Type[Endpoint], 

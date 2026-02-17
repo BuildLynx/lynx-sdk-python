@@ -14,7 +14,7 @@ from enum import Enum
 
 # -Lynx Imports-
 if TYPE_CHECKING:
-    from lynx_sdk.components.component import Component
+    from lynx_sdk.components.component import Component, ComponentState
 from lynx_sdk.utils.json_tools import validate_json_object
 
 # -External Imports-
@@ -163,6 +163,8 @@ class SubEndpoint(Endpoint):
             ValueError: If the payload fails schema validation (when schema exists)
         """
         try:
+            self.component.status["state"] = ComponentState.BUSY
+            self.component.status["action"] = self.topic
             self.component.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
             # Parse JSON bytes to dictionary
@@ -189,6 +191,8 @@ class SubEndpoint(Endpoint):
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
+        finally:
+            self.component.set_status(state=ComponentState.IDLE, action="")
 
 
 class PubEndpoint(Endpoint):

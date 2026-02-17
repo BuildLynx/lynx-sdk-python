@@ -69,6 +69,11 @@ SYS_ABOUT_ENDPOINT_ARGS = {
                     "description": "The state of the Component.",
                     "type": "string",
                     "enum": ["idle", "busy", "disconnected", "disabled"]
+                },
+                "action": {
+                    "title": "Action",
+                    "description": "The currently executing command or query on the Channel.",
+                    "type": "string"
                 }
             }
         },
@@ -123,21 +128,6 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 })
 
 # -Channel Endpoints-
-CHANNEL_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
-    "payload_schema": {
-        "status": {
-            "properties": {
-                "action": {
-                    "title": "Action",
-                    "description": "The currently executing command or query on the Channel.",
-                    "type": "string"
-                }
-            }
-        }
-    }
-})
-
-
 CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "topic": "/!/Poll",
     "description": "Start polling at a set time intervalon the channel for data.",
