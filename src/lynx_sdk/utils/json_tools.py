@@ -58,7 +58,7 @@ def trim_payload_by_contents(
         else:
             raise PayloadBuildingError(f"Invalid type in \"contents\" object: {type(contents)}. Expected Dict, List, or bool.")
     except KeyError as e:
-        raise PayloadBuildingError(f"Error building payload: {e}")
+        raise PayloadBuildingError(f"Key \"{e}\" in contents not found in data.")
 
 
 # -JSON Schema Tools-

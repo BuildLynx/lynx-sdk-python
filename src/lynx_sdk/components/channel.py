@@ -25,7 +25,7 @@ from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \
     CHANNEL_CMD_STOP_ENDPOINT_ARGS, \
     CHANNEL_OUT_DATA_ENDPOINT_ARGS
-from lynx_sdk.utils.json_tools import validate_json_schema
+from lynx_sdk.utils.json_tools import validate_json_schema, trim_payload_by_contents, PayloadBuildingError
 from lynx_sdk.utils.structures import LYNX_VERSION
 
 if TYPE_CHECKING:
@@ -146,7 +146,11 @@ class Channel(Component):
             lynx_version=channel_dict.get("lynx_version", LYNX_VERSION))
     
 
-    def repeat_polling(self, num_samples: int, interval: float, return_data: List[Dict[str, Any]]):
+    def repeat_polling(self, 
+        num_samples: int, 
+        interval: float, 
+        return_data: List[Dict[str, Any]], 
+        contents: Dict[str, Any] | bool = True):
         """
         Repeat the polling function for the given number of samples and interval. It appends the data to the return_data
             list provided to it. (It does this rather than return since threading calls don't support returns.)
@@ -159,6 +163,13 @@ class Channel(Component):
                 current_perf_counter_diff = 0
 
             data = self._poll_function()
+
+            if contents is not True:
+                try:
+                    data = trim_payload_by_contents(data, contents)
+                except PayloadBuildingError as e:
+                    self.service.logger.error(f"Error trimming payload: {e.message}")
+                    return
 
             return_data.append({
                 "sec": current_perf_counter_diff // int(1e9),
@@ -177,7 +188,7 @@ class Channel(Component):
         interval = payload.get("interval", 0)
         contents = payload.get("contents", True)
         data_list = []
-        poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, data_list))
+        poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, data_list, contents))
         poll_thread.start()
         poll_thread.join()
         self.out_data_endpoint.publish(payload=data_list)

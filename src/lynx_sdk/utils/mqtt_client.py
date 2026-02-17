@@ -111,6 +111,7 @@ class MqttClient:
             publish_properties.UserProperty = (key, value)
         
         # Publish the message
+        print(f"Publishing message to topic {topic} with payload {payload} and properties {publish_properties}")
         return self.client.publish(
             topic=topic,
             payload=orjson.dumps(payload),

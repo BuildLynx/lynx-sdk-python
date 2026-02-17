@@ -178,25 +178,17 @@ class Service(Component):
         """
         if message.topic in self.all_endpoint_topics_set:
             return
-        self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
+        self.logger.warning(f"Received message on topic \"{message.topic}\" but no endpoint is configured to handle it.")
 
 
     def on_connect(self, client: mqtt.Client, userdata: Any, flags: Dict, reason_code: int, properties: mqtt.Properties):
         """
         Callback for when the client connects to the MQTT broker.
         """
-        # self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
-        # self.sys_about_endpoint.publish(payload=self.produce_about())
-        # self.mqtt_client.subscribe(f"{self.id}/#")
         try:
             self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
-            self.logger.debug("About to call produce_about()")
-            about_data = self.produce_about()
-            self.logger.debug(f"About data produced, publishing to {self.sys_about_endpoint.topic}")
-            self.sys_about_endpoint.publish(payload=about_data)
-            self.logger.debug("About published successfully, subscribing")
+            self.sys_about_endpoint.publish(payload=self.produce_about())
             self.mqtt_client.subscribe(f"{self.id}/#")
-            self.logger.debug("Subscription complete")
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
@@ -242,7 +234,6 @@ class Service(Component):
         self.all_endpoint_topics_set: set[str] = set[str](self.endpoints.keys())
         for channel in self.channels.values():
             self.all_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
-        self.logger.debug(f"all_endpoint_topics_set: {self.all_endpoint_topics_set}")
         
         # Set default callbacks
         self.mqtt_client.set_on_message(self.no_endpoint_message)

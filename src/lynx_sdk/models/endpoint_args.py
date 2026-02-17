@@ -56,11 +56,6 @@ SYS_ABOUT_ENDPOINT_ARGS = {
                     "description": "The Lynx protocol version used by the Component.",
                     "type": "string",
                     "enum": [LYNX_VERSION]
-                },
-                "time_source": {
-                    "title": "Time Source",
-                    "description": "The time source type used by the Service.",
-                    "type": "string"
                 }
             }
         },
@@ -103,8 +98,8 @@ SYS_NOTICE_ENDPOINT_ARGS = {
     "payload_schema": {
         "action": {
             "title": "Action",
-            "description": "The command or query in execution when the notice was published. \
-                Empty if not related to a command or query.",
+            "description": "The command or query in execution when the notice was published. " \
+                + "Empty if not related to a command or query.",
             "type": "string"
         },
         "severity": {

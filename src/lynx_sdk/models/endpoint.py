@@ -85,16 +85,17 @@ class Endpoint:
         self.description: str = description
 
 
-    def validate_payload(self, payload_dict: Dict) -> None:
+    def validate_payload(self, payload_dict: Dict) -> bool:
         """
         Validate a payload dictionary against a JSON schema.
         """
         service = self.component.get_service()
         try:
             validate_json_object(payload_dict, self.payload_schema)
+            return True
         except jsonschema.exceptions.ValidationError as e:
             service.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
-            raise ValueError(f"JSON object validation failed: {e.message}")
+            return False
             
     
 
@@ -181,7 +182,8 @@ class SubEndpoint(Endpoint):
             
             # Validate payload against schema if schema exists
             if self.payload_schema is not None and len(payload) > 0:
-                self.validate_payload(payload)
+                if not self.validate_payload(payload):
+                    return
 
             # Call the handler with the parsed dictionary
             try:
@@ -256,7 +258,8 @@ class PubEndpoint(Endpoint):
             retain = self.default_retain
         
         if self.validate_output_payload and self.payload_schema is not None and len(payload) > 0:
-            self.validate_payload(payload)
+            if not self.validate_payload(payload):
+                return
         
         # Get Service to access MQTT client
         service = self.component.get_service()
