@@ -21,17 +21,12 @@ import sys
 from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
-    GET_ABOUT_ENDPOINT_ARGS, \
-    SYS_ABOUT_ENDPOINT_ARGS, \
-    SYS_NOTICE_ENDPOINT_ARGS, \
     CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
     CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \
     CHANNEL_CMD_STOP_ENDPOINT_ARGS, \
     CHANNEL_OUT_DATA_ENDPOINT_ARGS
-from lynx_sdk.models.time_source import TimeSource
-from lynx_sdk.utils.json_tools import validate_json_schema, generate_full_data_schema
+from lynx_sdk.utils.json_tools import validate_json_schema
 from lynx_sdk.utils.structures import LYNX_VERSION
-from lynx_sdk.models.notice import LoggingNoticeHandler
 
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
@@ -65,10 +60,7 @@ class Channel(Component):
         poll_function: Optional[Callable] = None,
         start_stream_function: Optional[Callable] = None,
         output_data_schema: Optional[Dict] = None,
-        lynx_version: str = LYNX_VERSION,
-        time_source: Optional[TimeSource] = None,
-        publish_logs_as_notices: Optional[bool] = None,
-        logger: Optional[logging.Logger] = None):
+        lynx_version: str = LYNX_VERSION):
         """
         Initialize a Lynx Channel object.
         
@@ -81,7 +73,6 @@ class Channel(Component):
             start_stream_function: Function to call to start streaming data
             output_data_schema: JSON schema for the channel's output data
             lynx_version: Lynx protocol version
-            time_source: Time source for timestamps (defaults to service's time source)
         """
         # Validate output data schema if provided
         if output_data_schema is not None:
@@ -89,33 +80,14 @@ class Channel(Component):
                 validate_json_schema(output_data_schema)
             except jsonschema.exceptions.ValidationError as e:
                 pass
-
-        if time_source is None:
-            time_source = service.time_source
         
-        if publish_logs_as_notices is None:
-            publish_logs_as_notices = service.publish_logs_as_notices
-        
-        # Initialize Component base class with channel-specific logger
-        if logger is None:
-            logger: logging.Logger = logging.getLogger(f"{service.id}.{id}")
-            logger.setLevel(level=logging.DEBUG)
-            stream_handler = logging.StreamHandler(stream=sys.stdout)
-            stream_handler.setLevel(level=logging.DEBUG)
-            logger.addHandler(stream_handler)
-            logger.propagate = False
-        
+        # Initialize Component base class
         super().__init__(
             id=id,
             component_type=ComponentType.CHANNEL,
             title=title,
             description=description,
-            lynx_version=lynx_version,
-            time_source=time_source,
-            logger=logger,
-            publish_logs_as_notices=publish_logs_as_notices,
-            client=service.client,
-            topic_prefix=f"{service.id}/{id}"
+            lynx_version=lynx_version
         )
         
         # -Channel-specific initialization-
@@ -125,10 +97,8 @@ class Channel(Component):
         self.last_payload: Dict = {}
 
         # -Endpoints-
-        self.get_about_endpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
-            lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
-        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SYS_ABOUT_ENDPOINT_ARGS)
-        self.sys_notice_endpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
+        # Note: Channel no longer has ?/About, @/About, or @/Notice endpoints
+        # These are redundant with Service's endpoints
 
         if isinstance(poll_function, Callable):
             self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
@@ -146,17 +116,20 @@ class Channel(Component):
             channel_out_data_schema = CHANNEL_OUT_DATA_ENDPOINT_ARGS.copy()
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
             self.out_data_endpoint = self.new_endpoint(PubEndpoint, channel_out_data_schema)
-        
-        # -Setup logging with notices-
-        if self.publish_logs_as_notices:
-            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
+    def get_service(self) -> "Service":
+        """
+        Get the parent Service that owns resources.
+        """
+        return self.service
+    
+    
     @classmethod
     def from_dict(
         cls, 
-        channel_dict: Dict, 
-        time_source: Optional[TimeSource] = None, 
+        channel_dict: Dict,
+        service: "Service",
         poll_function: Optional[Callable] = None,
         start_stream_function: Optional[Callable] = None) -> "Channel":
         """
@@ -164,13 +137,13 @@ class Channel(Component):
         """
         return cls(
             id=channel_dict["id"],
+            service=service,
             title=channel_dict["title"],
             description=channel_dict["description"],
             poll_function=poll_function,
             start_stream_function=start_stream_function,
-            output_data_schema=channel_dict["output_data_schema"],
-            lynx_version=channel_dict["lynx_version"],
-            time_source=time_source)
+            output_data_schema=channel_dict.get("output_data_schema"),
+            lynx_version=channel_dict.get("lynx_version", LYNX_VERSION))
     
 
     def repeat_polling(self, num_samples: int, interval: float, return_data: List[Dict[str, Any]]):
@@ -203,7 +176,6 @@ class Channel(Component):
         num_samples = payload.get("numSamples", 1)
         interval = payload.get("interval", 0)
         contents = payload.get("contents", True)
-        start_time = self.time_source.get_time()
         data_list = []
         poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, data_list))
         poll_thread.start()
@@ -237,7 +209,20 @@ class Channel(Component):
         """
         Produce a dictionary of information about the channel.
         """
-        return super().produce_about()
+        return {
+            "type": "channel",
+            "docs": {
+                "id": self.id,
+                "title": self.title,
+                "description": self.description,
+                "lynx_version": self.lynx_version,
+            },
+            "config": {},
+            "status": self.get_status(),
+            "endpoints": {
+                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
+            }
+        }
 # === MAIN LOOP ===
 
 

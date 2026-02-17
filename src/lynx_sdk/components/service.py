@@ -74,34 +74,32 @@ class Service(Component):
             publish_logs_as_notices: Whether to publish log messages as notices to MQTT
         """
 
-        if time_source is None:
-            time_source = instantiate_ideal_time_source()
-        if logger is None:
-            logger: logging.Logger = logging.getLogger(id)
-            logger.setLevel(level=logging.DEBUG)
-            stream_handler = logging.StreamHandler(stream=sys.stdout)
-            stream_handler.setLevel(level=logging.DEBUG)
-            logger.addHandler(stream_handler)
-            logger.propagate = False
-        
-        # -MQTT Client-
-        self.client: MqttClient = MqttClient(
-            client_id=id,
-            time_source=time_source
-        )
-
         # Initialize Component base class
         super().__init__(
             id=id,
             component_type=ComponentType.SERVICE,
             title=title,
             description=description,
-            lynx_version=lynx_version,
-            time_source=time_source,
-            logger=logger,
-            publish_logs_as_notices=publish_logs_as_notices,
-            client=self.client,
-            topic_prefix=id
+            lynx_version=lynx_version
+        )
+        
+        # -Service owns these resources-
+        self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
+        
+        if logger is None:
+            self.logger: logging.Logger = logging.getLogger(id)
+            self.logger.setLevel(level=logging.DEBUG)
+            stream_handler = logging.StreamHandler(stream=sys.stdout)
+            stream_handler.setLevel(level=logging.DEBUG)
+            self.logger.addHandler(stream_handler)
+            self.logger.propagate = False
+        else:
+            self.logger = logger
+        
+        # -MQTT Client-
+        self.client: MqttClient = MqttClient(
+            client_id=id,
+            time_source=self.time_source
         )
         
         # -Service-specific initialization-
@@ -109,9 +107,9 @@ class Service(Component):
         self.channels: Dict[str, Channel] = {}
         
         # -Endpoints-
+        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
         self.get_about_endpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
             lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
-        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
         self.sys_notice_endpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
         
         # -Setup logging with notices-
@@ -119,20 +117,22 @@ class Service(Component):
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
+    def get_service(self) -> "Service":
+        """
+        Get the Service (returns self since this IS the Service).
+        """
+        return self
+    
+    
     def new_poll_channel(
         self,
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Optional[Dict] = None,
-        time_source: Optional[TimeSource] = None):
+        output_data_schema: Optional[Dict] = None):
         """
         Create a new channel with a poll callback for the service.
         """
-
-        if time_source is None:
-            time_source = self.time_source
-        
         def decorator(poll_function: Callable):
             new_channel = Channel(
                 id=id,
@@ -142,8 +142,7 @@ class Service(Component):
                 poll_function=poll_function,
                 start_stream_function=None,
                 output_data_schema=output_data_schema,
-                lynx_version=self.lynx_version,
-                time_source=time_source)
+                lynx_version=self.lynx_version)
             self.channels[id] = new_channel
             return new_channel
         return decorator
@@ -154,15 +153,10 @@ class Service(Component):
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Optional[Dict] = None,
-        time_source: Optional[TimeSource] = None):
+        output_data_schema: Optional[Dict] = None):
         """
         Create a new channel with a start stream callback for the service.
         """
-
-        if time_source is None:
-            time_source = self.time_source
-        
         def decorator(start_stream_function: Callable):
             new_channel = Channel(
                 id=id,
@@ -172,8 +166,7 @@ class Service(Component):
                 poll_function=None,
                 start_stream_function=start_stream_function,
                 output_data_schema=output_data_schema,
-                lynx_version=self.lynx_version,
-                time_source=time_source)
+                lynx_version=self.lynx_version)
             self.channels[id] = new_channel
             return new_channel
         return decorator
@@ -181,10 +174,8 @@ class Service(Component):
 
     def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
         """
-        Publish a notice that the service received a message on an endpoint that is not configured.
+        Emit a notice that the service received a message on an endpoint that is not configured.
         """
-        if message.topic in self.all_endpoint_topics_set:
-            return
         self.logger.info(f"Received message on topic {message.topic} but no endpoint is configured to handle it.")
 
 
@@ -200,26 +191,45 @@ class Service(Component):
     def produce_about(self) -> Dict:
         """
         Produce a dictionary of information about the service.
-        Extends the base Component.produce_about() with service-specific channels.
         """
-        about = super().produce_about()
-        about["channels"] = {
-            channel.id: channel.produce_about() for channel in self.channels.values()
+        return {
+            "type": "service",
+            "docs": {
+                "id": self.id,
+                "title": self.title,
+                "description": self.description,
+                "lynx_version": self.lynx_version,
+                "time_source": self.time_source.time_source_type.value,
+            },
+            "config": {},
+            "status": self.get_status(),
+            "endpoints": {
+                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
+            },
+            "channels": {
+                channel.id: channel.produce_about() for channel in self.channels.values()
+            }
         }
-        return about
 
 
     def start(self):
         """
         Start the service and MQTT Client.
         """
+        # Register all endpoint callbacks
+        for endpoint in self.endpoints.values():
+            if endpoint.endpoint_direction.value == "sub":
+                self.client.add_callback(
+                    topic=endpoint.topic, 
+                    callback=endpoint.callback)
         
-        # All endpoint topics set is for making sure that service.no_endpoint_message() does not handle 
-        # incoming messages on topics that it publishes to, which would cause an infinite loop.
-        self.all_endpoint_topics_set: set[str] = set[str](self.endpoints.keys())
         for channel in self.channels.values():
-            self.all_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
-
+            for endpoint in channel.endpoints.values():
+                if endpoint.endpoint_direction.value == "sub":
+                    self.client.add_callback(
+                        topic=endpoint.topic,
+                        callback=endpoint.callback)
+        
         # Set default callbacks
         self.client.set_on_message(self.no_endpoint_message)
         self.client.set_on_connect(self.on_connect)

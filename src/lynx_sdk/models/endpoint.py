@@ -87,9 +87,11 @@ class Endpoint:
         """
         Validate a payload dictionary against a JSON schema.
         """
+        service = self.component.get_service()
         try:
             validate_json_object(payload_dict, self.payload_schema)
         except jsonschema.exceptions.ValidationError as e:
+            service.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
             raise ValueError(f"JSON object validation failed: {e.message}")
             
     
@@ -162,16 +164,17 @@ class SubEndpoint(Endpoint):
             ValueError: If the payload cannot be parsed as JSON
             ValueError: If the payload fails schema validation (when schema exists)
         """
+        service = self.component.get_service()
         try:
-            self.component.status["state"] = ComponentState.BUSY
-            self.component.status["action"] = self.topic
-            self.component.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
+            self.component._status["state"] = "busy"
+            self.component._status["action"] = self.topic
+            service.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
             # Parse JSON bytes to dictionary
             try:
                 payload: Dict = orjson.loads(message.payload)
             except orjson.JSONDecodeError as e:
-                self.component.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
+                service.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
                 raise ValueError(f"Invalid JSON payload: {e}") from e
             
             # Validate payload against schema if schema exists
@@ -182,17 +185,18 @@ class SubEndpoint(Endpoint):
             try:
                 return self.handler(payload)
             except Exception as e:
-                self.component.logger.exception(
+                service.logger.exception(
                     f"Handler exception for endpoint '{self.topic}': "
                     f"{type(e).__name__}: {str(e)}"
                 )
         except Exception as e:
-            self.component.logger.exception(
+            service.logger.exception(
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
         finally:
-            self.component.set_status(state=ComponentState.IDLE, action="")
+            self.component._status["state"] = "idle"
+            self.component._status["action"] = ""
 
 
 class PubEndpoint(Endpoint):
@@ -251,9 +255,13 @@ class PubEndpoint(Endpoint):
         if self.validate_payload and self.payload_schema is not None and len(payload) > 0:
             self.validate_payload(payload)
         
-        return self.component.client.publish(
+        # Get Service to access MQTT client
+        service = self.component.get_service()
+        return service.client.publish(
             topic=self.topic,
             payload=payload,
             qos=qos,
             retain=retain,
-            properties=properties)
+            properties=properties or {},
+            add_timestamp=True
+        )

@@ -1,6 +1,8 @@
 """
-Component base class for Lynx. A Component is any entity that has endpoints and can communicate via MQTT.
+Component base class for Lynx. A Component is any entity that has identity, endpoints, and can produce info about itself.
 Both Service and Channel inherit from Component.
+
+Note: Service owns the MQTT client, time_source, and logger. Channels access these through their parent Service.
 """
 
 
@@ -8,17 +10,19 @@ Both Service and Channel inherit from Component.
 # === IMPORTS ===
 
 # -stdlib Imports-
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, Callable, Any
+from typing import Dict, Optional, Type, Callable, Any, TYPE_CHECKING
 from logging import Logger
 from enum import Enum
 from copy import deepcopy
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
-from lynx_sdk.models.time_source import TimeSource
-from lynx_sdk.utils.mqtt_client import MqttClient
 from lynx_sdk.utils.datastructures import deep_merge
+
+if TYPE_CHECKING:
+    from lynx_sdk.components.service import Service
 
 # -External Imports-
 
@@ -55,11 +59,13 @@ class Component(ABC):
     Base class for Lynx components (Service, Channel, etc).
     
     A Component represents any entity in Lynx that:
-    - Has identity (id, title, description)
-    - Has endpoints for communication
-    - Has a time source for timestamps
-    - Has a logger for diagnostics
+    - Has identity (id, title, description, version)
+    - Has endpoints for communication  
     - Can produce an "about" description of itself
+    - Can track status (state, action)
+    
+    Note: MQTT client, time_source, and logger are owned by Service only.
+    Channels access these resources through their parent Service reference.
     
     This is an abstract base class and cannot be instantiated directly.
     Use Service or Channel instead.
@@ -71,12 +77,7 @@ class Component(ABC):
         component_type: ComponentType,
         title: str,
         description: str,
-        lynx_version: str,
-        time_source: Optional[TimeSource],
-        logger: Logger,
-        publish_logs_as_notices: bool,
-        client: MqttClient,
-        topic_prefix: str):
+        lynx_version: str):
         """
         Initialize a Lynx Component.
         
@@ -86,22 +87,12 @@ class Component(ABC):
             title: Human-readable title
             description: Human-readable description
             lynx_version: Lynx protocol version this component uses
-            time_source: Time source for timestamps (None if component doesn't need one)
-            logger: Logger for this component (defaults to logger named after id)
-            publish_logs_as_notices: Whether to publish log messages as Notices to MQTT
-            client: MQTT client for this component
-            topic_prefix: Prefix for the topics of the component (e.g. "service_id/channel_id")
         """
         self.id: str = id
         self.component_type: ComponentType = component_type
         self.title: str = title
         self.description: str = description
         self.lynx_version: str = lynx_version
-        self.time_source: Optional[TimeSource] = time_source
-        self.logger: Logger = logger
-        self.publish_logs_as_notices: bool = publish_logs_as_notices,
-        self.client: MqttClient = client
-        self.topic_prefix: str = topic_prefix
 
         self.endpoints: Dict[str, Endpoint] = {}
         self._status: Dict[str, Any] = {
@@ -116,38 +107,28 @@ class Component(ABC):
         Produce a dictionary describing this component.
         
         This base implementation provides common fields that all components share.
-        Subclasses can override this method to add component-specific information.
+        Subclasses must override this method to add component-specific information
+        (like time_source for Service, or parent service reference for Channel).
         
         Returns:
             Dictionary containing:
-            - type: Component type (service, channel, etc)
-            - docs: Documentation fields (title, description, version, time_source)
-            - config: Configuration information (empty by default)
-            - status: Status information (empty by default)
+            - docs: Documentation fields (id, title, description, version, type)
+            - config: Configuration information
+            - status: Status information
             - endpoints: Dictionary of endpoint information
         """
-        about_dict = {
-            "docs": {
-                "id": self.id,
-                "title": self.title,
-                "description": self.description,
-                "lynx_version": self.lynx_version,
-                "type": self.component_type.value.lower(),
-            },
-            "config": {},
-            "status": self.get_status(),
-            "endpoints": {
-                endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
-            }
-        }
-        
-        # Only include time_source if component has one
-        if self.time_source is not None:
-            about_dict["docs"]["time_source"] = self.time_source.time_source_type.value
-        
-        return about_dict
+        pass
     
 
+    @abstractmethod
+    def get_service(self) -> Service:
+        """
+        Get the Service that owns resources (MQTT client, time_source, logger).
+        For Service, returns self. For Channel, returns parent service.
+        """
+        pass
+    
+    
     def get_status(self) -> Dict[str, Any]:
         """
         Get the status of the component.
@@ -180,23 +161,49 @@ class Component(ABC):
             # if self.type == ComponentType.SERVICE:
             about_endpoint.publish(payload={})
         return self._status
-
+    
     
     def new_endpoint(self, 
         endpoint_class: Type[Endpoint], 
         endpoint_args: Dict, 
         sub_handler: Optional[Callable] = None) -> Endpoint:
         """
-        Create a new endpoint for the service from a dictionary of arguments. 
+        Create a new endpoint for this component from a dictionary of arguments.
+        
+        This is a convenience method that:
+        - Automatically passes component=self
+        - Constructs the full topic path from the component's ID
+        - Adds the handler for SubEndpoints
+        - Registers the endpoint in self.endpoints
+        
+        Args:
+            endpoint_class: The endpoint class to instantiate (SubEndpoint or PubEndpoint)
+            endpoint_args: Dictionary of arguments for the endpoint (topic, payload_schema, description, etc.)
+            sub_handler: Handler function for SubEndpoints
+            
+        Returns:
+            The created endpoint instance
         """
         endpoint_args = endpoint_args.copy()
         endpoint_args["component"] = self
-        endpoint_args["topic"] = self.topic_prefix + endpoint_args["topic"]
+        
+        # Construct full topic path
+        # Service endpoints: "service_id/?/About"
+        # Channel endpoints: "service_id/channel_id/?/About"
+        if self.component_type == ComponentType.CHANNEL:
+            service = self.get_service()
+            endpoint_args["topic"] = f"{service.id}/{self.id}{endpoint_args['topic']}"
+        else:
+            endpoint_args["topic"] = f"{self.id}{endpoint_args['topic']}"
+        
         if issubclass(endpoint_class, SubEndpoint):
             endpoint_args["handler"] = sub_handler
+        
         endpoint = endpoint_class(**endpoint_args)
         self.endpoints[endpoint.topic] = endpoint
         return endpoint
+
+    
 
 
 # === MAIN LOOP ===
