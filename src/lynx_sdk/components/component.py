@@ -136,6 +136,16 @@ class Component(ABC):
         return self._status
     
 
+    def get_status_dict(self) -> Dict[str, Any]:
+        """
+        Get the status of the component as a dictionary.
+        """
+        return {
+            "state": self._status["state"].value,
+            "action": self._status["action"]
+        }
+    
+
     def set_status(self, 
         state: Optional[ComponentState] = None, 
         action: Optional[str] = None, 

@@ -25,16 +25,21 @@ SYS_ABOUT_ENDPOINT_ARGS = {
     "default_qos": 1,
     "default_retain": True,
     "payload_schema": {
+        "lynxType": {
+            "title": "Lynx Component Type",
+            "description": "The type of the Lynx Component.",
+            "type": "string",
+            "enum": ["node", "service", "channel"]
+        },
         "docs": {
             "title": "Documentation",
             "description": "Docs cover the immutable metadata of the Component.",
             "type": "object",
             "properties": {
-                "type": {
-                    "title": "Type",
-                    "description": "The type of the Component.",
-                    "type": "string",
-                    "enum": ["service"]
+                "id": {
+                    "title": "ID",
+                    "description": "The unique identifier of the Component.",
+                    "type": "string"
                 },
                 "title": {
                     "title": "Title",
@@ -51,6 +56,11 @@ SYS_ABOUT_ENDPOINT_ARGS = {
                     "description": "The Lynx protocol version used by the Component.",
                     "type": "string",
                     "enum": [LYNX_VERSION]
+                },
+                "time_source": {
+                    "title": "Time Source",
+                    "description": "The time source type used by the Service.",
+                    "type": "string"
                 }
             }
         },

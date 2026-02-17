@@ -12,6 +12,8 @@ from logging import Logger, getLogger
 from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
 from enum import Enum
 
+from lynx_sdk.utils.mqtt_client import MqttClient
+
 # -Lynx Imports-
 if TYPE_CHECKING:
     from lynx_sdk.components.component import Component, ComponentState
@@ -119,7 +121,7 @@ class SubEndpoint(Endpoint):
         component: Component,
         payload_schema: object,
         description: str = "",
-        allow_run_while_busy: bool = True):
+        allow_run_while_busy: bool = True,):
         """
         Initialize a Lynx Subscribe Endpoint object.
         
@@ -139,10 +141,10 @@ class SubEndpoint(Endpoint):
             description=description)
         self.handler: Callable = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
-        self.component.client.add_callback(topic=self.topic, callback=self.callback)
+        self.component.get_service().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
 
-    def callback(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
+    def callback(self, mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
         """
         Handle an incoming MQTT message by parsing JSON bytes and calling the handler.
         
@@ -207,7 +209,7 @@ class PubEndpoint(Endpoint):
         description: str = "",
         default_qos: int = 0,
         default_retain: bool = False,
-        validate_payload: bool = True):
+        validate_output_payload: bool = True):
         """
         Initialize a Lynx Publish Endpoint object.
         
@@ -227,6 +229,7 @@ class PubEndpoint(Endpoint):
             description=description)
         self.default_qos: int = default_qos
         self.default_retain: bool = default_retain
+        self.validate_output_payload: bool = validate_output_payload
     
 
     def publish(
@@ -252,12 +255,12 @@ class PubEndpoint(Endpoint):
         if retain is None:
             retain = self.default_retain
         
-        if self.validate_payload and self.payload_schema is not None and len(payload) > 0:
+        if self.validate_output_payload and self.payload_schema is not None and len(payload) > 0:
             self.validate_payload(payload)
         
         # Get Service to access MQTT client
         service = self.component.get_service()
-        return service.client.publish(
+        return service.mqtt_client.publish(
             topic=self.topic,
             payload=payload,
             qos=qos,

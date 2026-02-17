@@ -102,15 +102,15 @@ class Channel(Component):
 
         if isinstance(poll_function, Callable):
             self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
-                self.poll_handler)
+                sub_handler=self.poll_handler)
 
         if isinstance(start_stream_function, Callable):
             self.cmd_stream_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STREAM_ENDPOINT_ARGS,
-                self.stream_handler)
+                sub_handler=self.stream_handler)
         
         if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
             self.cmd_stop_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STOP_ENDPOINT_ARGS,
-                self.stop_handler)
+                sub_handler=self.stop_handler)
 
         if output_data_schema is not None:
             channel_out_data_schema = CHANNEL_OUT_DATA_ENDPOINT_ARGS.copy()
@@ -210,7 +210,7 @@ class Channel(Component):
         Produce a dictionary of information about the channel.
         """
         return {
-            "type": "channel",
+            "lynxType": "channel",
             "docs": {
                 "id": self.id,
                 "title": self.title,
@@ -218,7 +218,7 @@ class Channel(Component):
                 "lynx_version": self.lynx_version,
             },
             "config": {},
-            "status": self.get_status(),
+            "status": self.get_status_dict(),
             "endpoints": {
                 endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             }
