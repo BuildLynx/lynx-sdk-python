@@ -77,4 +77,4 @@ class LoggingNoticeHandler(logging.Handler):
         notice: Notice = self.notice_from_record(record)
         sec: int = int(record.created)
         nsec: int = int((record.created - sec) * 1e9)
-        self.endpoint.publish(payload=notice.__dict__, properties={"sec": str(sec), "nsec": str(nsec)})
+        self.endpoint.publish(payload=notice.__dict__, properties={"s": str(sec), "ns": str(nsec)})

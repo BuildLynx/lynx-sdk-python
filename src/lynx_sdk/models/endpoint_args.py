@@ -211,12 +211,12 @@ CHANNEL_OUT_DATA_ENDPOINT_ARGS = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "sec": {
+                "s": {
                     "title": "Seconds",
                     "description": "Seconds since the start of the channel",
                     "type": "integer"
                 },
-                "nsec": {
+                "ns": {
                     "title": "Nanoseconds",
                     "description": "Nanoseconds since the start of the channel",
                     "type": "integer"

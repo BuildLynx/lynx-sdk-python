@@ -101,10 +101,10 @@ class MqttClient:
         publish_properties = Properties(PacketTypes.PUBLISH)
         
         # Add timestamp if requested and not already present
-        if add_timestamp and "sec" not in properties and "nsec" not in properties:
+        if add_timestamp and "s" not in properties and "ns" not in properties:
             publish_time = self.time_source.get_time()
-            properties["sec"] = str(publish_time['sec'])
-            properties["nsec"] = str(publish_time['nsec'])
+            properties["s"] = str(publish_time['s'])
+            properties["ns"] = str(publish_time['ns'])
         
         # Add all user properties
         for key, value in properties.items():

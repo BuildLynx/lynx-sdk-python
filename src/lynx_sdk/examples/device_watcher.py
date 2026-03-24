@@ -2,14 +2,14 @@ from lynx_sdk.components.channel import Channel
 from lynx_sdk.components.service import Service
 
 import psutil
-import logging
+import threading
 
 service = Service(
     id="device_watcher",
     title="Device Watcher",
     description="Watches the device running this service and publishes statistics.")
 
-
+# -CPU Load-
 @service.new_poll_channel(
     "cpu_load",
     title="CPU Load",
@@ -28,6 +28,7 @@ def sample_cpu_load():
 #         service.publish_exception("No temperature sensors found or supported on this system.")
 
 
+# -Memory-
 def sample_memory_status():
     mem_info = psutil.virtual_memory()
     return {
@@ -36,7 +37,6 @@ def sample_memory_status():
         "free": mem_info.free,
         "percent": mem_info.percent
     }
-
 
 MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
     "total": {
@@ -65,7 +65,6 @@ MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-
 memory_channel = Channel(
     id="memory",
     service=service,
@@ -76,9 +75,57 @@ memory_channel = Channel(
     start_stream_function=None)
 
 
+service.add_channel(memory_channel)
 
-service.channels["memory"] = memory_channel
 
+
+# -Minute Alert-
+
+MINUTE_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
+    "minute": {
+        "title": "Minute",
+        "type": "integer",
+        "description": "The minute of the hour",
+        "unit": "minutes"
+    },
+    "time": {
+        "title": "Time",
+        "type": "integer",
+        "description": "The current time in seconds since the epoch",
+        "unit": "seconds"
+    },
+    "timeString": {
+        "title": "Time String",
+        "type": "string",
+        "description": "The current time as a c-time formatted string"
+    }
+}
+
+def start_minute_alert(channel: Channel, queue_func: callable, exit_flag: threading.Event):
+    import time
+    last_minute = None
+    while not exit_flag.wait(timeout=0.1):
+        current_minute = time.localtime().tm_min
+        if current_minute != last_minute:
+            data = {
+                "minute": current_minute,
+                "time": int(time.time()),
+                "timeString": time.ctime()
+            }
+            queue_func(data)
+            last_minute = current_minute
+
+
+minute_channel = Channel(
+    id="minute-alert",
+    service=service,
+    title="Minute Alert",
+    description="Emit the time every time the minute changes",
+    poll_function=None,
+    output_data_schema=MINUTE_CHANNEL_DATA_SCHEMA,
+    start_stream_function=start_minute_alert)
+
+service.add_channel(minute_channel)
 
 
 if __name__ == "__main__":

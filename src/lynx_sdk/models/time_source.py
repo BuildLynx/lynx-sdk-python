@@ -60,8 +60,8 @@ class ProcessPerfTimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.perf_counter_ns()-self._start_time
         return {
-            "sec": current_time // NSEC_PER_SEC,
-            "nsec": current_time % NSEC_PER_SEC
+            "s": current_time // NSEC_PER_SEC,
+            "ns": current_time % NSEC_PER_SEC
         }
     
 
@@ -78,8 +78,8 @@ class UnixTimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
         return {
-            "sec": current_time // NSEC_PER_SEC,
-            "nsec": current_time % NSEC_PER_SEC
+            "s": current_time // NSEC_PER_SEC,
+            "ns": current_time % NSEC_PER_SEC
         }
 
 
@@ -95,8 +95,8 @@ class Epoch2000TimeSource(TimeSource):
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
         return {
-            "sec": (current_time // NSEC_PER_SEC) + EPOCH_DELTA_1970_TO_2000,
-            "nsec": current_time % NSEC_PER_SEC
+            "s": (current_time // NSEC_PER_SEC) + EPOCH_DELTA_1970_TO_2000,
+            "ns": current_time % NSEC_PER_SEC
         }
 
 

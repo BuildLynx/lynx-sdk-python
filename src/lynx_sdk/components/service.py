@@ -170,6 +170,15 @@ class Service(Component):
             self.channels[id] = new_channel
             return new_channel
         return decorator
+    
+
+    def add_channel(self, channel: Channel):
+        """
+        Add a channel to the service.
+        """
+        if channel.id in self.channels:
+            raise ValueError(f"Channel with id {channel.id} already exists in service {self.id}")
+        self.channels[channel.id] = channel
 
 
     def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
