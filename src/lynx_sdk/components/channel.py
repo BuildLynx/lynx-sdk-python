@@ -171,8 +171,6 @@ class Channel(Component):
         self._exit_flag = threading.Event() # Create a new exit flag for this polling session
         poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, contents, paginate))
         poll_thread.start()
-        poll_thread.join()
-        self._exit_flag = None # Reset exit flag after polling finishes
     
 
     def repeat_polling(self, 
@@ -189,6 +187,7 @@ class Channel(Component):
         data_list: List[Dict[str, Any]] = []
 
         if self._exit_flag == None:
+            self.service.logger.error("Exit flag not initialized for polling thread.")
             raise ValueError("Exit flag not initialized for polling thread.")
 
         for _ in loop_range:
@@ -225,6 +224,9 @@ class Channel(Component):
         # Publish any remaining data
         if len(data_list) > 0:
             self.out_data_endpoint.publish(payload=data_list)
+        
+        # Remove exit flag after polling finishes
+        self._exit_flag = None
 
 
     def start_stream_handler(self, payload: Dict):
@@ -245,8 +247,6 @@ class Channel(Component):
         queue_func = partial(self.queue_stream_data, stream_context=stream_context)
         stream_thread = threading.Thread(target=self._start_stream_function, kwargs={"channel": self, "queue_func": queue_func, "exit_flag": self._exit_flag})
         stream_thread.start()
-        stream_thread.join()
-        self._exit_flag = None # Reset exit flag after streaming finishes
     
 
     def queue_stream_data(self, data: Any, stream_context: StreamContext):
@@ -290,6 +290,9 @@ class Channel(Component):
         if stream_context.samples_processed >= stream_context.num_samples and len(stream_context.data_list) > 0:
             self._exit_flag.set() # Signal the stream to stop if we've processed the requested number of samples
             self.out_data_endpoint.publish(payload=stream_context.data_list)
+        
+        # Remove exit flag after streaming finishes
+        self._exit_flag = None
 
 
     def stop_handler(self):
