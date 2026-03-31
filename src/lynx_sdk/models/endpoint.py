@@ -183,6 +183,7 @@ class SubEndpoint(Endpoint):
             # Validate payload against schema if schema exists
             if self.payload_schema is not None and len(payload) > 0:
                 if not self.validate_payload(payload):
+                    # TODO - consider returning an error message or publishing to an error topic instead of just returning None
                     return
 
             # Call the handler with the parsed dictionary

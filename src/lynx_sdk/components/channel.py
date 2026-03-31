@@ -9,6 +9,7 @@ Channel class for Lynx. A Channel is the encapsulation of a single input and/or 
 # -stdlib Imports-
 from __future__ import annotations
 from typing import Callable, Dict, List, Any, Optional, TYPE_CHECKING
+from copy import deepcopy
 import threading
 import time
 import itertools
@@ -121,7 +122,7 @@ class Channel(Component):
                 sub_handler=self.stop_handler)
 
         if output_data_schema is not None:
-            channel_out_data_schema = CHANNEL_OUT_DATA_ENDPOINT_ARGS.copy()
+            channel_out_data_schema = deepcopy(CHANNEL_OUT_DATA_ENDPOINT_ARGS)
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
             self.out_data_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, channel_out_data_schema)
 
@@ -152,13 +153,33 @@ class Channel(Component):
     #         start_stream_function=start_stream_function,
     #         output_data_schema=channel_dict.get("output_data_schema"),
     #         lynx_version=channel_dict.get("lynx_version", LYNX_VERSION))
+
+
+    def poll_handler(self, payload: Dict):
+        """
+        Handle a poll request.
+        """
+        num_samples = payload.get("numSamples", 1)
+        interval = payload.get("interval", 0)
+        contents = payload.get("contents", True)
+        paginate = payload.get("paginate", num_samples)
+        if paginate == 0:
+            paginate = num_samples
+
+        #TODO - validate the contents dict against the endpoint's schema before starting the stream
+
+        self._exit_flag = threading.Event() # Create a new exit flag for this polling session
+        poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, contents, paginate))
+        poll_thread.start()
+        poll_thread.join()
+        self._exit_flag = None # Reset exit flag after polling finishes
     
 
     def repeat_polling(self, 
         num_samples: int, 
         interval: float, 
-        contents: Dict[str, Any] | bool = True,
-        paginate: int = 0):
+        contents: Dict[str, Any] | bool,
+        paginate: int):
         """
         Repeat the polling function for the given number of samples and interval. It appends the data to the return_data
             list provided to it. (It does this rather than return since threading calls don't support returns.)
@@ -170,54 +191,40 @@ class Channel(Component):
         if self._exit_flag == None:
             raise ValueError("Exit flag not initialized for polling thread.")
 
-        while not self._exit_flag.wait(timeout=0.001):
-            for _ in loop_range:
-                current_perf_counter_diff = time.perf_counter_ns()-start_perf_counter
-                if len(data_list) == 0:
-                    current_perf_counter_diff = 0
+        for _ in loop_range:
+            if self._exit_flag.wait(timeout=0.001):
+                break
 
-                data = self._poll_function()
+            current_perf_counter_diff = time.perf_counter_ns()-start_perf_counter
+            if len(data_list) == 0:
+                current_perf_counter_diff = 0
 
-                if contents is not True:
-                    try:
-                        data = trim_payload_by_contents(data, contents)
-                    except PayloadBuildingError as e:
-                        self.service.logger.error(f"Error trimming payload: {e.message}")
-                        return
+            data = self._poll_function()
 
-                data_list.append({
-                    "s": current_perf_counter_diff // int(1e9),
-                    "ns": current_perf_counter_diff % int(1e9),
-                    "data": data
-                })
+            if contents is not True:
+                try:
+                    data = trim_payload_by_contents(data, contents)
+                except PayloadBuildingError as e:
+                    self.service.logger.error(f"Error trimming payload: {e.message}")
+                    return
 
-                # If paginate is set and we've reached the page size, publish the current list and reset it
-                if len(data_list) >= paginate > 0:
-                    self.out_data_endpoint.publish(payload=data_list)
-                    data_list = []
-                    start_perf_counter = time.perf_counter_ns()
+            data_list.append({
+                "s": current_perf_counter_diff // int(1e9),
+                "ns": current_perf_counter_diff % int(1e9),
+                "data": data
+            })
 
-                time.sleep(interval)
+            # If paginate is set and we've reached the page size, publish the current list and reset it
+            if len(data_list) >= paginate > 0:
+                self.out_data_endpoint.publish(payload=data_list)
+                data_list = []
+                start_perf_counter = time.perf_counter_ns()
+
+            time.sleep(interval)
         
         # Publish any remaining data
         if len(data_list) > 0:
             self.out_data_endpoint.publish(payload=data_list)
-
-
-    def poll_handler(self, payload: Dict):
-        """
-        Handle a poll request.
-        """
-        num_samples = payload.get("numSamples", 1)
-        interval = payload.get("interval", 0)
-        contents = payload.get("contents", True)
-        paginate = payload.get("paginate", 0)
-
-        self._exit_flag = threading.Event() # Create a new exit flag for this polling session
-        poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, contents, paginate))
-        poll_thread.start()
-        poll_thread.join()
-        self._exit_flag = None # Reset exit flag after polling finishes
 
 
     def start_stream_handler(self, payload: Dict):
@@ -227,7 +234,11 @@ class Channel(Component):
         """
         num_samples = payload.get("numSamples", 0)
         contents = payload.get("contents", True)
-        paginate = payload.get("paginate", 0)
+        paginate = payload.get("paginate", num_samples)
+        if paginate == 0:
+            paginate = num_samples
+
+        #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
         self._exit_flag = threading.Event() # Create a new exit flag for this streaming session
         stream_context = StreamContext(num_samples=num_samples, contents=contents, paginate=paginate)
@@ -248,6 +259,9 @@ class Channel(Component):
         """
         stream_context.start_perf_counter = time.perf_counter_ns() # Reset perf counter for more accurate timing of stream data
 
+        if self._exit_flag.wait(timeout=0.001):
+            return
+
         current_perf_counter_diff = time.perf_counter_ns()-stream_context.start_perf_counter
         if len(stream_context.data_list) == 0:
             current_perf_counter_diff = 0
@@ -267,13 +281,14 @@ class Channel(Component):
         stream_context.samples_processed += 1
 
         # If paginate is set and we've reached the page size, publish the current list and reset it
-        if len(stream_context.data_list) >= stream_context.paginate > 0:
+        if len(stream_context.data_list) >= stream_context.paginate:
             self.out_data_endpoint.publish(payload=stream_context.data_list)
             stream_context.data_list = []
             stream_context.start_perf_counter = time.perf_counter_ns()
         
         # Publish any remaining data
-        if stream_context.samples_processed >= stream_context.num_samples > 0 and len(stream_context.data_list) > 0:
+        if stream_context.samples_processed >= stream_context.num_samples and len(stream_context.data_list) > 0:
+            self._exit_flag.set() # Signal the stream to stop if we've processed the requested number of samples
             self.out_data_endpoint.publish(payload=stream_context.data_list)
 
 

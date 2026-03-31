@@ -5,7 +5,7 @@ import psutil
 import threading
 
 service = Service(
-    id="device_watcher",
+    id="deviceWatcher",
     title="Device Watcher",
     description="Watches the device running this service and publishes statistics.")
 
@@ -117,7 +117,7 @@ def start_minute_alert(channel: Channel, queue_func: callable, exit_flag: thread
 
 
 minute_channel = Channel(
-    id="minute-alert",
+    id="minuteAlert",
     service=service,
     title="Minute Alert",
     description="Emit the time every time the minute changes",

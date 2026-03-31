@@ -112,13 +112,15 @@ class MqttClient:
         
         # Publish the message
         print(f"Publishing message to topic {topic} with payload {payload} and properties {publish_properties}")
-        return self.client.publish(
+        message_info: mqtt.MQTTMessageInfo = self.client.publish(
             topic=topic,
             payload=orjson.dumps(payload),
             qos=qos,
             retain=retain,
             properties=publish_properties
-        )
+        )  # Wait for the publish to complete
+        print("publish mid", message_info.mid, "rc", message_info.rc, "is_published", message_info.is_published())
+        return message_info
     
     
     def subscribe(self, topic: str, qos: int = 0) -> Any:
