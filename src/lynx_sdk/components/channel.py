@@ -159,10 +159,7 @@ class Channel(Component):
         """
         Handle a poll request.
         """
-        num_samples = payload.get("numSamples", 1)
         contents = payload.get("contents", True)
-        if paginate == 0:
-            paginate = num_samples
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
@@ -175,16 +172,19 @@ class Channel(Component):
                 self.service.logger.error(f"Error trimming payload: {e.message}")
                 return
         
-        self.out_data_endpoint.publish(payload=data)
-        
+        payload = [{"s": 0, "ns": 0, "data": data}]
+
+        self.out_data_endpoint.publish(payload=payload)
+
 
     def start_stream_handler(self, payload: Dict):
         """
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
         """
-        num_samples = payload.get("numSamples", 0)
         contents = payload.get("contents", True)
+        num_samples = payload.get("numSamples", 0)
+        interval = payload.get("interval", 0)
         paginate = payload.get("paginate", num_samples)
         if paginate == 0:
             paginate = num_samples

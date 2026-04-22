@@ -141,7 +141,7 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
             "title": "Values to contents",
             "description": "Default everything to true if empty",
             "default": {},
-            "type": "object"
+            "type": ["object", "boolean"]
         }
     }
 }
@@ -154,7 +154,7 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
             "title": "Values to contents",
             "description": "Default everything to true if empty",
             "default": {},
-            "type": "object"
+            "type": ["object", "boolean"]
         },
         "interval": {
             "title": "Sample Interval",
