@@ -160,74 +160,23 @@ class Channel(Component):
         Handle a poll request.
         """
         num_samples = payload.get("numSamples", 1)
-        interval = payload.get("interval", 0)
         contents = payload.get("contents", True)
-        paginate = payload.get("paginate", num_samples)
         if paginate == 0:
             paginate = num_samples
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
-        self._exit_flag = threading.Event() # Create a new exit flag for this polling session
-        poll_thread = threading.Thread(target=self.repeat_polling, args=(num_samples, interval, contents, paginate))
-        poll_thread.start()
-    
-
-    def repeat_polling(self, 
-        num_samples: int, 
-        interval: float, 
-        contents: Dict[str, Any] | bool,
-        paginate: int):
-        """
-        Repeat the polling function for the given number of samples and interval. It appends the data to the return_data
-            list provided to it. (It does this rather than return since threading calls don't support returns.)
-        """
-        loop_range = itertools.count() if num_samples == 0 else range(num_samples)
-        start_perf_counter = time.perf_counter_ns()
-        data_list: List[Dict[str, Any]] = []
-
-        if self._exit_flag == None:
-            self.service.logger.error("Exit flag not initialized for polling thread.")
-            raise ValueError("Exit flag not initialized for polling thread.")
-
-        for _ in loop_range:
-            if self._exit_flag.wait(timeout=0.001):
-                break
-
-            current_perf_counter_diff = time.perf_counter_ns()-start_perf_counter
-            if len(data_list) == 0:
-                current_perf_counter_diff = 0
-
-            data = self._poll_function()
-
-            if contents is not True:
-                try:
-                    data = trim_payload_by_contents(data, contents)
-                except PayloadBuildingError as e:
-                    self.service.logger.error(f"Error trimming payload: {e.message}")
-                    return
-
-            data_list.append({
-                "s": current_perf_counter_diff // int(1e9),
-                "ns": current_perf_counter_diff % int(1e9),
-                "data": data
-            })
-
-            # If paginate is set and we've reached the page size, publish the current list and reset it
-            if len(data_list) >= paginate > 0:
-                self.out_data_endpoint.publish(payload=data_list)
-                data_list = []
-                start_perf_counter = time.perf_counter_ns()
-
-            time.sleep(interval)
+        data = self._poll_function()
         
-        # Publish any remaining data
-        if len(data_list) > 0:
-            self.out_data_endpoint.publish(payload=data_list)
+        if contents is not True:
+            try:
+                data = trim_payload_by_contents(data, contents)
+            except PayloadBuildingError as e:
+                self.service.logger.error(f"Error trimming payload: {e.message}")
+                return
         
-        # Remove exit flag after polling finishes
-        self._exit_flag = None
-
+        self.out_data_endpoint.publish(payload=data)
+        
 
     def start_stream_handler(self, payload: Dict):
         """
@@ -292,7 +241,7 @@ class Channel(Component):
             self.out_data_endpoint.publish(payload=stream_context.data_list)
         
         # Remove exit flag after streaming finishes
-        self._exit_flag = None
+        self._exit_flag = None #TODO Not 
 
 
     def stop_handler(self):

@@ -137,32 +137,11 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "topic": "/!/Poll",
     "description": "Start polling at a set time intervalon the channel for data.",
     "payload_schema": {
-        "numSamples": {
-            "title": "Number of Samples",
-            "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
-            "default": 0,
-            "type": "integer",
-            "minimum": 0
-        },
-        "interval": {
-            "title": "Sample Interval",
-            "description": "Seconds between samples",
-            "default": 1.0,
-            "type": "number",
-            "minimum": 0
-        },
         "contents": {
             "title": "Values to contents",
             "description": "Default everything to true if empty",
             "default": {},
             "type": "object"
-        },
-        "paginate": {
-            "title": "Paginate",
-            "description": "0 for no pagination, positive int for page size, default 0",
-            "default": 0,
-            "type": "integer",
-            "minimum": 0
         }
     }
 }
@@ -171,18 +150,25 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
     "topic": "/!/Stream",
     "description": "Start streaming on the channel, emitting data when available.",
     "payload_schema": {
+        "contents": {
+            "title": "Values to contents",
+            "description": "Default everything to true if empty",
+            "default": {},
+            "type": "object"
+        },
+        "interval": {
+            "title": "Sample Interval",
+            "description": "Seconds between samples",
+            "default": 1.0,
+            "type": "number",
+            "minimum": 0
+        },
         "numSamples": {
             "title": "Number of Samples",
             "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
             "default": 0,
             "type": "integer",
             "minimum": 0
-        },
-        "contents": {
-            "title": "Values to contents",
-            "description": "Default everything to true if empty",
-            "default": {},
-            "type": "object"
         },
         "paginate": {
             "title": "Paginate",
