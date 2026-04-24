@@ -119,7 +119,6 @@ class MqttClient:
             retain=retain,
             properties=publish_properties
         )  # Wait for the publish to complete
-        print("publish mid", message_info.mid, "rc", message_info.rc, "is_published", message_info.is_published())
         return message_info
     
     
