@@ -17,7 +17,7 @@ from functools import partial
 from dataclasses import dataclass
 
 # -Lynx Imports-
-from lynx_sdk.components.component import Component, ComponentType
+from lynx_sdk.components.component import Component, ComponentType, ComponentState
 from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
@@ -49,15 +49,29 @@ import jsonschema
 # === CLASSES ===
 
 class PayloadBuilder:
+    """
+    Helper class to build a payload for the channel's output data endpoint, mainly used by Stream channels.
+    """
     def __init__(self, contents: Dict[str, Any] | bool, paginate: int, out_data_endpoint: PubEndpoint, service: Service):
-        self.contents = contents
+        """
+        Initialize a PayloadBuilder object.
+        Args:
+            contents: The contents of the payload.
+            paginate: The number of samples to paginate.
+            out_data_endpoint: The endpoint to publish the payload to.
+            service: The service to use for logging.
+        """
+        self.contents: Dict[str, Any] | bool = contents
         self.data_list: List[Dict[str, Any]] = []
-        self.perf_counter = time.perf_counter_ns()
-        self.paginate = paginate
-        self.out_data_endpoint = out_data_endpoint
-        self.service = service
+        self.perf_counter: int = time.perf_counter_ns()
+        self.paginate: int = paginate
+        self.out_data_endpoint: PubEndpoint = out_data_endpoint
+        self.service: Service = service
     
     def add_data(self, data: Any):
+        """
+        Add data to the payload builder.
+        """
         if len(self.data_list) == 0:
             self.perf_counter = time.perf_counter_ns()
             current_perf_counter_diff = 0
@@ -82,6 +96,9 @@ class PayloadBuilder:
     
 
     def publish(self):
+        """
+        Publish the payload to the output data endpoint.
+        """
         if len(self.data_list) == 0:
             return
         self.out_data_endpoint.publish(payload=self.data_list)
@@ -227,6 +244,7 @@ class Channel(Component):
         """
         Handle a stream request.
         """
+        self.set_status(state=ComponentState.BUSY, action={"command": "Stream", "payload": req_payload})
         samples_processed = 0
         for data in self._stream_function(req_payload=req_payload, exit_flag=exit_flag):
             if num_samples > 0 and samples_processed >= num_samples:
@@ -239,7 +257,7 @@ class Channel(Component):
         payload_builder.publish()
         self._exit_flag.set()
         self._exit_flag = None
-        #self.set_status(state=ComponentState.STOPPED)
+        self.set_status(state=ComponentState.IDLE, action={"command": "", "payload": {}})
 
 
     def stop_handler(self, payload: Dict):
@@ -267,3 +285,12 @@ class Channel(Component):
                 endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             }
         }
+    
+    def set_status(self, 
+        state: Optional[ComponentState] = None, 
+        action: Optional[Dict[str, Any]] = None, 
+        about_endpoint: Optional[PubEndpoint] = None) -> Dict[str, Any]:
+        """
+        Set the status of the channel.
+        """
+        return super().set_status(state=state, action=action, about_endpoint=self.service.sys_about_endpoint)

@@ -97,7 +97,10 @@ class Component(ABC):
         self.endpoints: Dict[str, Endpoint] = {}
         self._status: Dict[str, Any] = {
             "state": ComponentState.IDLE,
-            "action": ""
+            "action": {
+                "command": "",
+                "payload": {}
+            }
         }
     
     
@@ -148,7 +151,7 @@ class Component(ABC):
 
     def set_status(self, 
         state: Optional[ComponentState] = None, 
-        action: Optional[str] = None, 
+        action: Optional[Dict[str, Any]] = None,
         about_endpoint: Optional[PubEndpoint] = None) -> Dict[str, Any]:
         """
         Set the status of the component. 
@@ -168,8 +171,11 @@ class Component(ABC):
             self._status["action"] = action
             changed_status = True
         if changed_status and about_endpoint is not None:
-            # if self.type == ComponentType.SERVICE:
-            about_endpoint.publish(payload={})
+            if self.component_type == ComponentType.CHANNEL:
+                payload = {"channels": {self.id: {"status": self._status}}}
+            else:
+                payload = {"status": self._status}
+            about_endpoint.publish(payload=payload)
         return self._status
     
     

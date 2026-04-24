@@ -78,7 +78,19 @@ SYS_ABOUT_ENDPOINT_ARGS = {
                 "action": {
                     "title": "Action",
                     "description": "The currently executing command or query on the Channel.",
-                    "type": "string"
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "title": "Command",
+                            "description": "The command of the action.",
+                            "type": "string"
+                        },
+                        "payload": {
+                            "title": "Payload",
+                            "description": "The payload of the action.",
+                            "type": "object"
+                        }
+                    }
                 }
             }
         },

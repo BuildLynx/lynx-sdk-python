@@ -169,8 +169,6 @@ class SubEndpoint(Endpoint):
         """
         service = self.component.get_service()
         try:
-            self.component._status["state"] = "busy"
-            self.component._status["action"] = self.topic
             service.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
             stripped_payload = message.payload.strip()
@@ -203,9 +201,6 @@ class SubEndpoint(Endpoint):
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
-        finally:
-            self.component._status["state"] = "idle"
-            self.component._status["action"] = ""
 
 
 class PubEndpoint(Endpoint):
