@@ -140,7 +140,7 @@ class Service(Component):
                 title=title,
                 description=description,
                 poll_function=poll_function,
-                start_stream_function=None,
+                stream_function=None,
                 output_data_schema=output_data_schema,
                 lynx_version=self.lynx_version)
             self.channels[id] = new_channel
@@ -157,14 +157,14 @@ class Service(Component):
         """
         Create a new channel with a start stream callback for the service.
         """
-        def decorator(start_stream_function: Callable):
+        def decorator(stream_function: Callable):
             new_channel = Channel(
                 id=id,
                 service=self,
                 title=title,
                 description=description,
                 poll_function=None,
-                start_stream_function=start_stream_function,
+                stream_function=stream_function,
                 output_data_schema=output_data_schema,
                 lynx_version=self.lynx_version)
             self.channels[id] = new_channel

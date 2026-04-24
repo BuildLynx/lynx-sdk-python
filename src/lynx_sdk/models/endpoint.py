@@ -173,9 +173,13 @@ class SubEndpoint(Endpoint):
             self.component._status["action"] = self.topic
             service.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
+            stripped_payload = message.payload.strip()
+
             # Parse JSON bytes to dictionary
+            if len(stripped_payload) == 0:
+                stripped_payload = "{}" # Default to an empty dictionary if the payload is empty
             try:
-                payload: Dict = orjson.loads(message.payload)
+                payload: Dict = orjson.loads(stripped_payload)
             except orjson.JSONDecodeError as e:
                 service.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
                 raise ValueError(f"Invalid JSON payload: {e}") from e

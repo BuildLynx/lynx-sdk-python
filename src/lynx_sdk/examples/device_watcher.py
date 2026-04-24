@@ -72,7 +72,7 @@ memory_channel = Channel(
     description="RAM status of the system",
     poll_function=sample_memory_status,
     output_data_schema=MEMORY_CHANNEL_DATA_SCHEMA,
-    start_stream_function=None)
+    stream_function=None)
 
 
 service.add_channel(memory_channel)
@@ -80,13 +80,12 @@ service.add_channel(memory_channel)
 
 
 # -Minute Alert-
-
-MINUTE_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
-    "minute": {
-        "title": "Minute",
+SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
+    "second": {
+        "title": "Second",
         "type": "integer",
-        "description": "The minute of the hour",
-        "unit": "minutes"
+        "description": "The second of the minute",
+        "unit": "seconds"
     },
     "time": {
         "title": "Time",
@@ -101,31 +100,35 @@ MINUTE_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def start_minute_alert(channel: Channel, queue_func: callable, exit_flag: threading.Event):
+def second_alert(req_payload: dict, exit_flag: threading.Event):
     import time
-    last_minute = None
-    while not exit_flag.wait(timeout=0.1):
-        current_minute = time.localtime().tm_min
-        if current_minute != last_minute:
+    last_second = None
+    print("Second alert started")
+
+    while not exit_flag.wait(timeout=0.01):
+        current_second = time.localtime().tm_sec
+        if current_second != last_second:
             data = {
-                "minute": current_minute,
+                "second": current_second,
                 "time": int(time.time()),
                 "timeString": time.ctime()
             }
-            queue_func(data)
-            last_minute = current_minute
+            last_second = current_second
+            yield data
+    
+    print("Second alert stopped")
 
 
-minute_channel = Channel(
-    id="minuteAlert",
+second_channel = Channel(
+    id="secondAlert",
     service=service,
-    title="Minute Alert",
-    description="Emit the time every time the minute changes",
+    title="Second Alert",
+    description="Emit the time every time the second changes",
     poll_function=None,
-    output_data_schema=MINUTE_CHANNEL_DATA_SCHEMA,
-    start_stream_function=start_minute_alert)
+    output_data_schema=SECOND_CHANNEL_DATA_SCHEMA,
+    stream_function=second_alert)
 
-service.add_channel(minute_channel)
+service.add_channel(second_channel)
 
 
 if __name__ == "__main__":

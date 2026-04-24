@@ -48,16 +48,45 @@ import jsonschema
 
 # === CLASSES ===
 
-@dataclass
-class StreamContext():
-    def __init__(self, num_samples: int, contents: Dict[str, Any] | bool, paginate: int):
-        self.num_samples = num_samples
+class PayloadBuilder:
+    def __init__(self, contents: Dict[str, Any] | bool, paginate: int, out_data_endpoint: PubEndpoint, service: Service):
         self.contents = contents
-        self.paginate = paginate
-        self.start_perf_counter = time.perf_counter_ns()
         self.data_list: List[Dict[str, Any]] = []
-        self.samples_processed = 0
+        self.perf_counter = time.perf_counter_ns()
+        self.paginate = paginate
+        self.out_data_endpoint = out_data_endpoint
+        self.service = service
+    
+    def add_data(self, data: Any):
+        if len(self.data_list) == 0:
+            self.perf_counter = time.perf_counter_ns()
+            current_perf_counter_diff = 0
+        else:
+            current_perf_counter_diff = time.perf_counter_ns()-self.perf_counter
+        
+        if self.contents is not True:
+            try:
+                data = trim_payload_by_contents(data, self.contents)
+            except PayloadBuildingError as e:
+                self.service.logger.error(f"Error trimming payload: {e.message}")
+                return
+        
+        self.data_list.append({
+            "s": current_perf_counter_diff // int(1e9),
+            "ns": current_perf_counter_diff % int(1e9),
+            "data": data
+        })
 
+        if len(self.data_list) >= self.paginate:
+            self.publish()
+    
+
+    def publish(self):
+        if len(self.data_list) == 0:
+            return
+        self.out_data_endpoint.publish(payload=self.data_list)
+        self.data_list = []
+        self.perf_counter = time.perf_counter_ns()
 
 
 class Channel(Component):
@@ -67,7 +96,7 @@ class Channel(Component):
         title: str = "",
         description: str = "",
         poll_function: Optional[Callable] = None,
-        start_stream_function: Optional[Callable] = None,
+        stream_function: Optional[Callable] = None,
         output_data_schema: Optional[Dict] = None,
         lynx_version: str = LYNX_VERSION):
         """
@@ -102,7 +131,7 @@ class Channel(Component):
         # -Channel-specific initialization-
         self.service: Service = service
         self._poll_function: Optional[Callable] = poll_function
-        self._start_stream_function: Optional[Callable] = start_stream_function
+        self._stream_function: Optional[Callable] = stream_function
         self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
 
         # -Endpoints-
@@ -113,11 +142,9 @@ class Channel(Component):
             self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
                 sub_handler=self.poll_handler)
 
-        if isinstance(start_stream_function, Callable):
+        if isinstance(stream_function, Callable):
             self.cmd_stream_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STREAM_ENDPOINT_ARGS,
                 sub_handler=self.start_stream_handler)
-        
-        if isinstance(poll_function, Callable) or isinstance(start_stream_function, Callable):
             self.cmd_stop_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STOP_ENDPOINT_ARGS,
                 sub_handler=self.stop_handler)
 
@@ -184,7 +211,6 @@ class Channel(Component):
         """
         contents = payload.get("contents", True)
         num_samples = payload.get("numSamples", 0)
-        interval = payload.get("interval", 0)
         paginate = payload.get("paginate", num_samples)
         if paginate == 0:
             paginate = num_samples
@@ -192,63 +218,35 @@ class Channel(Component):
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
         self._exit_flag = threading.Event() # Create a new exit flag for this streaming session
-        stream_context = StreamContext(num_samples=num_samples, contents=contents, paginate=paginate)
-        queue_func = partial(self.queue_stream_data, stream_context=stream_context)
-        stream_thread = threading.Thread(target=self._start_stream_function, kwargs={"channel": self, "queue_func": queue_func, "exit_flag": self._exit_flag})
+        payload_builder = PayloadBuilder(contents=contents, paginate=paginate, out_data_endpoint=self.out_data_endpoint, service=self.service)
+        stream_thread = threading.Thread(target=self._stream_handler, kwargs={"req_payload": payload, "payload_builder": payload_builder, "num_samples": num_samples, "exit_flag": self._exit_flag})
         stream_thread.start()
+
     
-
-    def queue_stream_data(self, data: Any, stream_context: StreamContext):
+    def _stream_handler(self, req_payload: Dict, payload_builder: PayloadBuilder, num_samples: int, exit_flag: threading.Event):
         """
-        Callback for the stream function.
-
-        Args:
-            data: The data to be published, provided by the user code.
-            stream_context (StreamContext): The context of the current stream, provided by start_stream_handler via a partial bind.
+        Handle a stream request.
         """
-        stream_context.start_perf_counter = time.perf_counter_ns() # Reset perf counter for more accurate timing of stream data
-
-        if self._exit_flag.wait(timeout=0.001):
-            return
-
-        current_perf_counter_diff = time.perf_counter_ns()-stream_context.start_perf_counter
-        if len(stream_context.data_list) == 0:
-            current_perf_counter_diff = 0
-
-        if stream_context.contents is not True:
-            try:
-                data = trim_payload_by_contents(data, stream_context.contents)
-            except PayloadBuildingError as e:
-                self.service.logger.error(f"Error trimming payload: {e.message}")
-                return
-
-        stream_context.data_list.append({
-            "s": current_perf_counter_diff // int(1e9),
-            "ns": current_perf_counter_diff % int(1e9),
-            "data": data
-        })
-        stream_context.samples_processed += 1
-
-        # If paginate is set and we've reached the page size, publish the current list and reset it
-        if len(stream_context.data_list) >= stream_context.paginate:
-            self.out_data_endpoint.publish(payload=stream_context.data_list)
-            stream_context.data_list = []
-            stream_context.start_perf_counter = time.perf_counter_ns()
-        
-        # Publish any remaining data
-        if stream_context.samples_processed >= stream_context.num_samples and len(stream_context.data_list) > 0:
-            self._exit_flag.set() # Signal the stream to stop if we've processed the requested number of samples
-            self.out_data_endpoint.publish(payload=stream_context.data_list)
-        
-        # Remove exit flag after streaming finishes
-        self._exit_flag = None #TODO Not 
+        samples_processed = 0
+        for data in self._stream_function(req_payload=req_payload, exit_flag=exit_flag):
+            if num_samples > 0 and samples_processed >= num_samples:
+                break
+            if exit_flag.wait(timeout=0.001):
+                break
+            payload_builder.add_data(data)
+            samples_processed += 1
+    
+        payload_builder.publish()
+        self._exit_flag.set()
+        self._exit_flag = None
+        #self.set_status(state=ComponentState.STOPPED)
 
 
-    def stop_handler(self):
+    def stop_handler(self, payload: Dict):
         """
         Stop the channel's polling/streaming.
         """
-        pass
+        self._exit_flag.set()
 
 
     def produce_about(self) -> Dict:
@@ -269,6 +267,3 @@ class Channel(Component):
                 endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             }
         }
-# === MAIN LOOP ===
-
-
