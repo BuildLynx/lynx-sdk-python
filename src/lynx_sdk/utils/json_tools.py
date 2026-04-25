@@ -29,30 +29,65 @@ if TYPE_CHECKING:
 
 
 # === FUNCTIONS ===
+def make_mock_payload(model_payload: Dict) -> Dict:
+    """
+    Make a mock payload from a model payload.
+    """
+    if isinstance(model_payload, Dict):
+        mock_payload = {}
+        for key in model_payload.keys():
+            if isinstance(model_payload[key], Dict):
+                mock_payload[key] = make_mock_payload(model_payload[key])
+            elif isinstance(model_payload[key], List):
+                mock_payload[key] = [make_mock_payload(item) for item in model_payload[key]]
+            else:
+                mock_payload[key] = None
+        return mock_payload
+    elif isinstance(model_payload, List):
+        return [make_mock_payload(item) for item in model_payload]
+    else:
+        return None
+
 
 # -JSON Payload Tools-
 def trim_payload_by_contents(
     payload: Dict,
-    contents: Dict | List | bool = True) -> Any:
+    contents: Dict | List | bool = True,
+    old_payload: Dict | None = None) -> Any:
     """
-    Recursively build a JSON dict by trimming a superset dict by a dict of keys to contents.
+    Recursively build a JSON dict by trimming a superset dict by a dict of keys to contents. 
     """
+    if old_payload is None:
+        old_payload = make_mock_payload(payload)
     try:
         # -Boolean cases-
         if contents is True:
             return payload
         elif contents is False:
-            return None
+            if old_payload == payload:
+                return None
+            else:
+                return payload
         # -List case-
         elif isinstance(contents, List) and len(contents) > 0: # Have to dig one level deeper in payload if it's an array
             if isinstance(payload, List) and len(payload) > 0:
-                return [trim_payload_by_contents(item, contents[0]) for item in payload]
+                new_payload = []
+                for idx in range(len(payload)):
+                    returned_value = trim_payload_by_contents(payload[idx], contents[0], old_payload[idx])
+                    if returned_value is not None:
+                        new_payload.append(returned_value)
+                return new_payload
             else:
                 return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected List.")
         # -Dict case-
         elif isinstance(contents, Dict):
             if isinstance(payload, Dict) and len(payload) > 0:
-                return {key: trim_payload_by_contents(payload[key], contents[key]) for key in contents.keys()}
+                new_payload = {}
+                for key in contents.keys():
+                    returned_value = trim_payload_by_contents(payload[key], contents[key], old_payload[key])
+                    if returned_value is not None:
+                        new_payload[key] = returned_value
+                return new_payload
             else:
                 return PayloadBuildingError(f"Invalid payload type: {type(payload)}. Expected Dict.")
         else:
@@ -109,6 +144,8 @@ def validate_json_object(
     Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
     """
     json_schema = generate_full_data_schema(json_schema)
+    
+    # print(f"-----------------------:\n{json_object}\n{json_schema}\n")
     if validator is None:
         validator = jsonschema.Draft7Validator(json_schema)
     validator.validate(json_object)

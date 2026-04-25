@@ -67,11 +67,13 @@ class PayloadBuilder:
         self.paginate: int = paginate
         self.out_data_endpoint: PubEndpoint = out_data_endpoint
         self.service: Service = service
+        self.last_data: Any = None
     
     def add_data(self, data: Any):
         """
         Add data to the payload builder.
         """
+
         if len(self.data_list) == 0:
             self.perf_counter = time.perf_counter_ns()
             current_perf_counter_diff = 0
@@ -80,7 +82,9 @@ class PayloadBuilder:
         
         if self.contents is not True:
             try:
-                data = trim_payload_by_contents(data, self.contents)
+                data = trim_payload_by_contents(data, self.contents, self.last_data)
+                if data == {}: # Data is empty when contents change-of-value values are all the same as last data
+                    return
             except PayloadBuildingError as e:
                 self.service.logger.error(f"Error trimming payload: {e.message}")
                 return
@@ -93,7 +97,9 @@ class PayloadBuilder:
 
         if len(self.data_list) >= self.paginate:
             self.publish()
-    
+
+        self.last_data = data
+        
 
     def publish(self):
         """
@@ -115,6 +121,7 @@ class Channel(Component):
         poll_function: Optional[Callable] = None,
         stream_function: Optional[Callable] = None,
         output_data_schema: Optional[Dict] = None,
+        config: Dict[str, Any] = {"streamOnStartup": False},
         lynx_version: str = LYNX_VERSION):
         """
         Initialize a Lynx Channel object.
@@ -127,6 +134,7 @@ class Channel(Component):
             poll_function: Function to call for polling data
             start_stream_function: Function to call to start streaming data
             output_data_schema: JSON schema for the channel's output data
+            config: Configuration for the channel
             lynx_version: Lynx protocol version
         """
         # Validate output data schema if provided
@@ -151,10 +159,6 @@ class Channel(Component):
         self._stream_function: Optional[Callable] = stream_function
         self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
 
-        # -Endpoints-
-        # Note: Channel no longer has ?/About, @/About, or @/Notice endpoints
-        # These are redundant with Service's endpoints
-
         if isinstance(poll_function, Callable):
             self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
                 sub_handler=self.poll_handler)
@@ -169,6 +173,10 @@ class Channel(Component):
             channel_out_data_schema = deepcopy(CHANNEL_OUT_DATA_ENDPOINT_ARGS)
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
             self.out_data_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, channel_out_data_schema)
+
+        self.config: Dict[str, Any] = config
+        if self.config.get("streamOnStartup", False) and isinstance(stream_function, Callable):
+            self.start_stream_handler(payload={"contents": True, "numSamples": 0, "paginate": 1})
 
 
     def get_service(self) -> "Service":

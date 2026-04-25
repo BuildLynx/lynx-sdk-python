@@ -126,9 +126,36 @@ second_channel = Channel(
     description="Emit the time every time the second changes",
     poll_function=None,
     output_data_schema=SECOND_CHANNEL_DATA_SCHEMA,
-    stream_function=second_alert)
+    stream_function=second_alert,
+    config={"streamOnStartup": False})
 
 service.add_channel(second_channel)
+
+
+#-Random Number Stream-
+RANDOM_NUMBER_CHANNEL_DATA_SCHEMA = {
+    "number": {
+        "title": "Random Number",
+        "type": "number",
+        "description": "A random integer between 1 and 3"
+    }
+}
+
+def random_number_stream(req_payload: dict, exit_flag: threading.Event):
+    import random
+    while not exit_flag.wait(timeout=1):
+        yield {"number": random.randint(1, 3)}
+
+
+service.add_channel(Channel(
+    id="random",
+    service=service,
+    title="Random Number",
+    description="Emit a random integer between 1 and 3",
+    poll_function=None,
+    output_data_schema=RANDOM_NUMBER_CHANNEL_DATA_SCHEMA,
+    stream_function=random_number_stream,
+    config={"streamOnStartup": False}))
 
 
 if __name__ == "__main__":
