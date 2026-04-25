@@ -184,27 +184,6 @@ class Channel(Component):
         Get the parent Service that owns resources.
         """
         return self.service
-    
-    
-    # @classmethod
-    # def from_dict(
-    #     cls, 
-    #     channel_dict: Dict,
-    #     service: "Service",
-    #     poll_function: Optional[Callable] = None,
-    #     start_stream_function: Optional[Callable] = None) -> "Channel":
-    #     """
-    #     Initialize a Lynx Channel object from a dictionary.
-    #     """
-    #     return cls(
-    #         id=channel_dict["id"],
-    #         service=service,
-    #         title=channel_dict["title"],
-    #         description=channel_dict["description"],
-    #         poll_function=poll_function,
-    #         start_stream_function=start_stream_function,
-    #         output_data_schema=channel_dict.get("output_data_schema"),
-    #         lynx_version=channel_dict.get("lynx_version", LYNX_VERSION))
 
 
     def poll_handler(self, payload: Dict):
@@ -234,6 +213,10 @@ class Channel(Component):
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
         """
+        if self._status.get("state") != ComponentState.IDLE:
+            self.service.logger.warning(f"Channel '{self.id}' is not idle, ignoring stream start request.")
+            return
+        
         contents = payload.get("contents", True)
         num_samples = payload.get("numSamples", 0)
         paginate = payload.get("paginate", num_samples)
@@ -254,7 +237,11 @@ class Channel(Component):
         """
         self.set_status(state=ComponentState.BUSY, action={"command": "Stream", "payload": req_payload})
         samples_processed = 0
-        for data in self._stream_function(req_payload=req_payload, exit_flag=exit_flag):
+
+        def continue_sampling(interval_sec: float):
+            return not self._exit_flag.wait(timeout=interval_sec)
+
+        for data in self._stream_function(req_payload=req_payload, continue_sampling=continue_sampling):
             if num_samples > 0 and samples_processed >= num_samples:
                 break
             if exit_flag.wait(timeout=0.001):
@@ -294,6 +281,7 @@ class Channel(Component):
             }
         }
     
+
     def set_status(self, 
         state: Optional[ComponentState] = None, 
         action: Optional[Dict[str, Any]] = None, 

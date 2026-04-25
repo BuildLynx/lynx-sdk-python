@@ -1,3 +1,4 @@
+from typing import Callable
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.components.service import Service
 
@@ -100,12 +101,12 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def second_alert(req_payload: dict, exit_flag: threading.Event):
+def second_alert(req_payload: dict, continue_sampling: Callable):
     import time
     last_second = None
     print("Second alert started")
 
-    while not exit_flag.wait(timeout=0.01):
+    while continue_sampling(interval_sec=0.01):
         current_second = time.localtime().tm_sec
         if current_second != last_second:
             data = {
@@ -141,9 +142,9 @@ RANDOM_NUMBER_CHANNEL_DATA_SCHEMA = {
     }
 }
 
-def random_number_stream(req_payload: dict, exit_flag: threading.Event):
+def random_number_stream(req_payload: dict, continue_sampling: Callable):
     import random
-    while not exit_flag.wait(timeout=1):
+    while continue_sampling(interval_sec=1):
         yield {"number": random.randint(1, 3)}
 
 
@@ -159,7 +160,4 @@ service.add_channel(Channel(
 
 
 if __name__ == "__main__":
-    # import json
-    # import pprint
-    # print(json.dumps(service.produce_about(), indent=2))
     service.start()

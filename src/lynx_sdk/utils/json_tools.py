@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 # === FUNCTIONS ===
-def make_mock_payload(model_payload: Dict) -> Dict:
+def make_mock_payload(model_payload: Any) -> Any:
     """
     Make a mock payload from a model payload.
     """
