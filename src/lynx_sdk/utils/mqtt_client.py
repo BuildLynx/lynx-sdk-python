@@ -49,8 +49,7 @@ class MqttClient:
         self,
         client_id: str,
         time_source: TimeSource,
-        paho_client: Optional[mqtt.Client] = None
-    ):
+        paho_client: Optional[mqtt.Client] = None):
         """
         Initialize a Paho MQTT client wrapper.
         

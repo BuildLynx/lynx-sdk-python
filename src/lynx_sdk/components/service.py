@@ -8,20 +8,17 @@ a Time Source, an MQTT Client, and has its own Endpoints.
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import List, Dict, Callable, Any, Optional, Type
-from dataclasses import dataclass
+from typing import Dict, Callable, Optional
 import logging
-import sys
-import time
 from copy import deepcopy
 
 # -Lynx Imports-
-from lynx_sdk.components.component import Component, ComponentType
+from lynx_sdk.components.client_component import ClientComponent
+from lynx_sdk.components.component import ComponentType
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
-from lynx_sdk.utils.mqtt_client import MqttClient
-from lynx_sdk.models.time_source import TimeSource, instantiate_ideal_time_source
-from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
+from lynx_sdk.models.time_source import TimeSource
+from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     GET_ABOUT_ENDPOINT_ARGS, \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
@@ -29,7 +26,6 @@ from lynx_sdk.models.endpoint_args import \
 from lynx_sdk.models.notice import LoggingNoticeHandler
 
 # -External Imports-
-import paho.mqtt.client as mqtt
 
 
 # === CONSTANTS ===
@@ -46,13 +42,7 @@ import paho.mqtt.client as mqtt
 
 #  === CLASSES ===
 
-class ServiceStatus():
-    def __init__(self):
-        self.action: str = ""
-        
-
-
-class Service(Component):
+class Service(ClientComponent):
     def __init__(self,
         id: str,
         title: str = "",
@@ -83,34 +73,17 @@ class Service(Component):
             lynx_version=lynx_version
         )
         
-        # -Service owns these resources-
-        self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
-        
-        if logger is None:
-            self.logger: logging.Logger = logging.getLogger(id)
-            self.logger.setLevel(level=logging.DEBUG)
-            stream_handler = logging.StreamHandler(stream=sys.stdout)
-            stream_handler.setLevel(level=logging.DEBUG)
-            self.logger.addHandler(stream_handler)
-            self.logger.propagate = False
-        else:
-            self.logger = logger
-        
-        # -MQTT Client-
-        self.mqtt_client: MqttClient = MqttClient(
-            client_id=id,
-            time_source=self.time_source
-        )
-        
         # -Service-specific initialization-
         # -Channels-
         self.channels: Dict[str, Channel] = {}
         
         # -Endpoints-
-        self.sys_about_endpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
+        self.sys_about_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
             lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
-        self.sys_notice_endpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
+        self.sys_notice_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
+        # all_endpoint_topics_set is not appended in Component.new_endpoint because we don't want Channels to have repeat endpoints
+        self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
         
         # -Setup logging with notices-
         if publish_logs_as_notices:
@@ -179,35 +152,7 @@ class Service(Component):
         if channel.id in self.channels:
             raise ValueError(f"Channel with id {channel.id} already exists in service {self.id}")
         self.channels[channel.id] = channel
-
-
-    def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
-        """
-        Emit a notice that the service received a message on an endpoint that is not configured.
-        """
-        if message.topic in self.all_endpoint_topics_set:
-            return
-        self.logger.warning(f"Received message on topic \"{message.topic}\" but no endpoint is configured to handle it.")
-
-
-    def on_connect(self, client: mqtt.Client, userdata: Any, flags: Dict, reason_code: int, properties: mqtt.Properties):
-        """
-        Callback for when the client connects to the MQTT broker.
-        """
-        try:
-            self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
-            self.sys_about_endpoint.publish(payload=self.produce_about())
-            self.mqtt_client.subscribe(f"{self.id}/#")
-        except Exception as e:
-            self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
-            raise
-    
-    
-    def on_disconnect(self, client: mqtt.Client, userdata: Any, disconnect_flags: Dict, reason_code: int, properties: mqtt.Properties):
-        """
-        Callback for when the client disconnects from the MQTT broker.
-        """
-        self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
+        self.client_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
 
 
     def produce_about(self) -> Dict:
@@ -232,39 +177,15 @@ class Service(Component):
                 channel.id: channel.produce_about() for channel in self.channels.values()
             }
         }
+    
 
-
-    def start(self):
+    def publish_about(self):
         """
-        Start the service and MQTT Client.
+        Publish the about information to the MQTT broker.
         """
-        # All endpoint topics set is for making sure that service.no_endpoint_message() does not handle 
-        # incoming messages on topics that it publishes to, which would cause an infinite loop.
-        self.all_endpoint_topics_set: set[str] = set[str](self.endpoints.keys())
-        for channel in self.channels.values():
-            self.all_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
-        
-        # Set default callbacks
-        self.mqtt_client.set_on_message(self.no_endpoint_message)
-        self.mqtt_client.set_on_connect(self.on_connect)
-        self.mqtt_client.client.on_disconnect = self.on_disconnect
-        
-        # Connect to broker
-        try:
-            self.mqtt_client.connect(host="localhost", port=1883, keepalive=60)
-        except ConnectionRefusedError as e:
-            self.logger.error(f"Failed to connect to MQTT broker, is the broker running?")
-            return
-        
-        # Start network loop
-        self.mqtt_client.loop_start()
-        
-        # Keep service running
-        self.logger.debug(f"Service {self.id} started successfully, entering main loop")
-        while True:
-            time.sleep(1)
+        self.sys_about_endpoint.publish(payload=self.produce_about())
+    
 
-        
 # === MAIN LOOP ===
 
 
