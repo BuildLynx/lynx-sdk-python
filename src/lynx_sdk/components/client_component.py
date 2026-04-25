@@ -8,7 +8,7 @@ Client Component base class for Lynx. A Client Component is a component that has
 
 # -stdlib Imports-
 import logging
-from typing import Dict, Any, abstractmethod, Optional
+from typing import Dict, Any, abstractmethod, Optional, Tuple
 import time
 import sys
 
@@ -40,6 +40,7 @@ import paho.mqtt.client as mqtt
 class ClientComponent(Component):
     def __init__(self,
         id: str,
+        broker_socket: Tuple[str, int],
         component_type: ComponentType,
         title: str,
         description: str,
@@ -56,6 +57,7 @@ class ClientComponent(Component):
             description=description, 
             lynx_version=lynx_version)
         
+        self.broker_socket: Tuple[str, int] = broker_socket
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
         
         if logger is None:
@@ -123,7 +125,7 @@ class ClientComponent(Component):
         
         # Connect to broker
         try:
-            self.mqtt_client.connect(host="localhost", port=1883, keepalive=60)
+            self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=60)
         except ConnectionRefusedError as e:
             self.logger.error(f"Failed to connect to MQTT broker, is the broker running?")
             return

@@ -7,6 +7,7 @@ import threading
 
 service = Service(
     id="deviceWatcher",
+    broker_socket=("localhost", 1883),
     title="Device Watcher",
     description="Watches the device running this service and publishes statistics.")
 
