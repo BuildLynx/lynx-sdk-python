@@ -92,7 +92,7 @@ class Service(ClientComponent):
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
 
-    def get_service(self) -> "Service":
+    def get_client_component(self) -> ClientComponent:
         """
         Get the Service (returns self since this IS the Service).
         """

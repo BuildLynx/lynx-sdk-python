@@ -89,12 +89,12 @@ class Endpoint:
         """
         Validate a payload dictionary against a JSON schema.
         """
-        service = self.component.get_service()
+        client_component = self.component.get_client_component()
         try:
             validate_json_object(payload_dict, self.payload_schema)
             return True
         except jsonschema.exceptions.ValidationError as e:
-            service.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
+            client_component.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
             return False
             
     
@@ -142,7 +142,7 @@ class SubEndpoint(Endpoint):
             description=description)
         self.handler: Callable = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
-        self.component.get_service().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
+        self.component.get_client_component().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
 
     def callback(self, mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
@@ -167,9 +167,9 @@ class SubEndpoint(Endpoint):
             ValueError: If the payload cannot be parsed as JSON
             ValueError: If the payload fails schema validation (when schema exists)
         """
-        service = self.component.get_service()
+        client_component = self.component.get_client_component()
         try:
-            service.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
+            client_component.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
             stripped_payload = message.payload.strip()
 
@@ -179,7 +179,7 @@ class SubEndpoint(Endpoint):
             try:
                 payload: Dict = orjson.loads(stripped_payload)
             except orjson.JSONDecodeError as e:
-                service.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
+                client_component.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
                 raise ValueError(f"Invalid JSON payload: {e}") from e
             
             # Validate payload against schema if schema exists
@@ -192,12 +192,12 @@ class SubEndpoint(Endpoint):
             try:
                 return self.handler(payload)
             except Exception as e:
-                service.logger.exception(
+                client_component.logger.exception(
                     f"Handler exception for endpoint '{self.topic}': "
                     f"{type(e).__name__}: {str(e)}"
                 )
         except Exception as e:
-            service.logger.exception(
+            client_component.logger.exception(
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
@@ -262,8 +262,8 @@ class PubEndpoint(Endpoint):
                 return
         
         # Get Service to access MQTT client
-        service = self.component.get_service()
-        return service.mqtt_client.publish(
+        client_component = self.component.get_client_component()
+        return client_component.mqtt_client.publish(
             topic=self.topic,
             payload=payload,
             qos=qos,

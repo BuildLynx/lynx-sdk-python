@@ -23,6 +23,7 @@ from lynx_sdk.utils.datastructures import deep_merge
 
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
+    from lynx_sdk.components.client_component import ClientComponent
 
 # -External Imports-
 
@@ -124,14 +125,12 @@ class Component(ABC):
     
 
     @abstractmethod
-    def get_service(self) -> Service:
+    def get_client_component(self) -> ClientComponent:
         """
-        Get the Service that owns resources (MQTT client, time_source, logger).
-        For Service, returns self. For Channel, returns parent service.
+        Get the ClientComponent that owns resources (MQTT client, time_source, logger).
         """
         pass
-    
-    
+
     def get_status(self) -> Dict[str, Any]:
         """
         Get the status of the component.
@@ -207,7 +206,7 @@ class Component(ABC):
         # Service endpoints: "service_id/?/About"
         # Channel endpoints: "service_id/channel_id/?/About"
         if self.component_type == ComponentType.CHANNEL:
-            service = self.get_service()
+            service: Service = self.get_client_component()
             endpoint_args["topic"] = f"{service.id}/{self.id}{endpoint_args['topic']}"
         else:
             endpoint_args["topic"] = f"{self.id}{endpoint_args['topic']}"

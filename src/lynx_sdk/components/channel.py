@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType, ComponentState
+from lynx_sdk.components.client_component import ClientComponent
 from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
@@ -179,9 +180,9 @@ class Channel(Component):
             self.start_stream_handler(payload={"contents": True, "numSamples": 0, "paginate": 1})
 
 
-    def get_service(self) -> "Service":
+    def get_client_component(self) -> ClientComponent:
         """
-        Get the parent Service that owns resources.
+        Get the Service that owns resources (MQTT client, time_source, logger).
         """
         return self.service
 

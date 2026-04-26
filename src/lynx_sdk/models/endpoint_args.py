@@ -133,8 +133,30 @@ SYS_NOTICE_ENDPOINT_ARGS = {
     }
 }
 
+# -Node Endpoints-
+NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
+    "payload_schema": {
+        "services": {
+            "title": "Services",
+            "description": "Object representing all the services of the Node.",
+            "type": "object"
+        },
+        "child_nodes": {
+            "title": "Child Nodes",
+            "description": "Object representing all the child nodes of the Node.",
+            "type": "object"
+        }
+    }
+})
+
+NODE_MONITOR_ABOUT_ENDPOINT_ARGS = {
+    "topic": "/+/@/About",
+    "description": "Monitor about messages from child nodes and services.",
+    "payload_schema": SYS_ABOUT_ENDPOINT_ARGS["payload_schema"]
+}
+
 # -Service Endpoints-
-SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {   
+SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
     "payload_schema": {
         "channels": {
             "title": "Channels",
