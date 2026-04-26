@@ -102,7 +102,7 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def second_alert(req_payload: dict, continue_sampling: Callable):
+def second_alert(req_payload: dict, continue_sampling: Callable, exit_flag: threading.Event):
     import time
     last_second = None
     print("Second alert started")
@@ -143,7 +143,7 @@ RANDOM_NUMBER_CHANNEL_DATA_SCHEMA = {
     }
 }
 
-def random_number_stream(req_payload: dict, continue_sampling: Callable):
+def random_number_stream(req_payload: dict, continue_sampling: Callable, exit_flag: threading.Event):
     import random
     while continue_sampling(interval_sec=1):
         yield {"number": random.randint(1, 3)}

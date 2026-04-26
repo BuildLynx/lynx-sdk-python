@@ -242,7 +242,7 @@ class Channel(Component):
         def continue_sampling(interval_sec: float):
             return not self._exit_flag.wait(timeout=interval_sec)
 
-        for data in self._stream_function(req_payload=req_payload, continue_sampling=continue_sampling):
+        for data in self._stream_function(req_payload=req_payload, continue_sampling=continue_sampling, exit_flag=exit_flag):
             if num_samples > 0 and samples_processed >= num_samples:
                 break
             if exit_flag.wait(timeout=0.001):
