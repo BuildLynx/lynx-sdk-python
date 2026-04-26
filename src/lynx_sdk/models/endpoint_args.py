@@ -24,6 +24,7 @@ SYS_ABOUT_ENDPOINT_ARGS = {
     "description": "Publish information about the Component.",
     "default_qos": 1,
     "default_retain": True,
+    "validate_output_payload": False, # False so that we can emit payloads with hash strings if content is a hash string
     "payload_schema": {
         "lynxType": {
             "title": "Lynx Component Type",

@@ -13,11 +13,9 @@ import logging
 # -Lynx Imports-
 from lynx_sdk.components.client_component import ClientComponent
 from lynx_sdk.components.component import ComponentType
-from lynx_sdk.components.service import Service
-from lynx_sdk.components.channel import Channel
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.models.time_source import TimeSource
-from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
+from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     GET_ABOUT_ENDPOINT_ARGS, \
     NODE_SYS_ABOUT_ENDPOINT_ARGS, \
@@ -25,6 +23,7 @@ from lynx_sdk.models.endpoint_args import \
     NODE_MONITOR_ABOUT_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
 from lynx_sdk.utils.datastructures import deep_merge
+from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
 
 # -External Imports-
 
@@ -124,6 +123,20 @@ class Node(ClientComponent):
         else:
             self.logger.warning(f"Received unknown lynxType in about message. {payload['id']}: {payload['lynxType']}")
     
+
+    def about_handler(self, payload: Dict):
+        """
+        Handle incoming About messages from the service.
+        """
+        contents = payload.get("contents", True)
+        if contents is not True:
+            try:
+                outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)
+            except PayloadBuildingError as e:
+                self.logger.error(f"Error trimming payload: {e.message}")
+                return
+        self.sys_about_endpoint.publish(payload=outgoing_payload)
+
 
     def produce_about(self) -> Dict:
         """

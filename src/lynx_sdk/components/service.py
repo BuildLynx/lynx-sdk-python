@@ -24,6 +24,7 @@ from lynx_sdk.models.endpoint_args import \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
     SYS_NOTICE_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
+from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
 
 # -External Imports-
 
@@ -81,8 +82,7 @@ class Service(ClientComponent):
         
         # -Endpoints-
         self.sys_about_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
-            lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
+        self.get_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS, sub_handler=self.about_handler)
         self.sys_notice_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
         # all_endpoint_topics_set is not appended in Component.new_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
@@ -155,6 +155,20 @@ class Service(ClientComponent):
             raise ValueError(f"Channel with id {channel.id} already exists in service {self.id}")
         self.channels[channel.id] = channel
         self.client_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
+
+
+    def about_handler(self, payload: Dict):
+        """
+        Handle incoming About messages from the service.
+        """
+        contents = payload.get("contents", True)
+        if contents is not True:
+            try:
+                outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)
+            except PayloadBuildingError as e:
+                self.logger.error(f"Error trimming payload: {e.message}")
+                return
+        self.sys_about_endpoint.publish(payload=outgoing_payload)
 
 
     def produce_about(self) -> Dict:

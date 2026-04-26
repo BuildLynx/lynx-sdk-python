@@ -14,6 +14,8 @@ import copy
 # -External Imports-
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import jsonschema
+import xxhash
+import orjson
 
 if TYPE_CHECKING:
     from jsonschema.protocols import Validator
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
 
 
 # === FUNCTIONS ===
-def make_mock_payload(model_payload: Any) -> Any:
+def make_mock_payload(model_payload: Any, mock_value: Any = None) -> Any:
     """
     Make a mock payload from a model payload.
     """
@@ -41,19 +43,19 @@ def make_mock_payload(model_payload: Any) -> Any:
             elif isinstance(model_payload[key], List):
                 mock_payload[key] = [make_mock_payload(item) for item in model_payload[key]]
             else:
-                mock_payload[key] = None
+                mock_payload[key] = mock_value
         return mock_payload
     elif isinstance(model_payload, List):
         return [make_mock_payload(item) for item in model_payload]
     else:
-        return None
+        return mock_value
 
 
 # -JSON Payload Tools-
 def trim_payload_by_contents(
-    payload: Dict,
-    contents: Dict | List | bool = True,
-    old_payload: Dict | None = None) -> Any:
+    payload: Dict | Any,
+    contents: Dict | List | bool | str = True,
+    old_payload: Dict | Any | None = None) -> Any:
     """
     Recursively build a JSON dict by trimming a superset dict by a dict of keys to contents. 
     """
@@ -68,6 +70,16 @@ def trim_payload_by_contents(
                 return None
             else:
                 return payload
+        # -String case (xxh32 hash of canonized JSON (RFC 8785 / JCS)
+        elif isinstance(contents, str):
+            xxh32_hash_str = xxhash.xxh32(orjson.dumps(payload)).hexdigest()
+            if xxh32_hash_str == contents:
+                return None
+            else:
+                if isinstance(payload, Dict):
+                    return {k: xxhash.xxh32(orjson.dumps(v)).hexdigest() for k, v in payload.items()}
+                else:
+                    return xxh32_hash_str
         # -List case-
         elif isinstance(contents, List) and len(contents) > 0: # Have to dig one level deeper in payload if it's an array
             if isinstance(payload, List) and len(payload) > 0:
