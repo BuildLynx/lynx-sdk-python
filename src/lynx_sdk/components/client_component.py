@@ -125,7 +125,7 @@ class ClientComponent(Component):
         self.mqtt_client.set_on_connect(self.on_connect)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
 
-        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"offline"}}', qos=1, retain=True)
+        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         
         # Connect to broker
         while True:

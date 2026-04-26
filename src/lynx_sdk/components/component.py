@@ -207,9 +207,13 @@ class Component(ABC):
         # Channel endpoints: "service_id/channel_id/?/About"
         if self.component_type == ComponentType.CHANNEL:
             service: Service = self.get_client_component()
-            endpoint_args["topic"] = f"{service.id}/{self.id}{endpoint_args['topic']}"
+            endpoint_args["topic"] = f"{service.id}/{self.id}/{endpoint_args['topic']}"
+        elif self.component_type == ComponentType.SERVICE:
+            endpoint_args["topic"] = f"{self.id}/{endpoint_args['topic']}"
+        elif self.component_type == ComponentType.NODE:
+            endpoint_args["topic"] = endpoint_args['topic']
         else:
-            endpoint_args["topic"] = f"{self.id}{endpoint_args['topic']}"
+            raise ValueError(f"Invalid component type: {self.component_type}")
         
         if issubclass(endpoint_class, SubEndpoint):
             endpoint_args["handler"] = sub_handler

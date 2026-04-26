@@ -7,7 +7,7 @@ from lynx_sdk.utils.datastructures import deep_merge
 
 # -Component Endpoints-
 GET_ABOUT_ENDPOINT_ARGS = {
-    "topic": "/?/About",
+    "topic": "?/About",
     "description": "Query information about the Component.",
     "payload_schema": {
         "contents": {
@@ -20,7 +20,7 @@ GET_ABOUT_ENDPOINT_ARGS = {
 }
 
 SYS_ABOUT_ENDPOINT_ARGS = {
-    "topic": "/@/About",
+    "topic": "@/About",
     "description": "Publish information about the Component.",
     "default_qos": 1,
     "default_retain": True,
@@ -104,7 +104,7 @@ SYS_ABOUT_ENDPOINT_ARGS = {
 }
 
 SYS_NOTICE_ENDPOINT_ARGS = {
-    "topic": "/@/Notice",
+    "topic": "@/Notice",
     "description": "Publish a notice about the Component.",
     "default_qos": 1,
     "default_retain": False,
@@ -151,7 +151,7 @@ NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 })
 
 NODE_MONITOR_ABOUT_ENDPOINT_ARGS = {
-    "topic": "/+/@/About",
+    "topic": "+/@/About",
     "description": "Monitor about messages from child nodes and services.",
     "payload_schema": SYS_ABOUT_ENDPOINT_ARGS["payload_schema"]
 }
@@ -169,7 +169,7 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 
 # -Channel Endpoints-
 CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
-    "topic": "/!/Poll",
+    "topic": "!/Poll",
     "description": "Start polling at a set time intervalon the channel for data.",
     "payload_schema": {
         "contents": {
@@ -182,7 +182,7 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
 }
 
 CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
-    "topic": "/!/Stream",
+    "topic": "!/Stream",
     "description": "Start streaming on the channel, emitting data when available.",
     "payload_schema": {
         "contents": {
@@ -216,13 +216,13 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
 }
 
 CHANNEL_CMD_STOP_ENDPOINT_ARGS = {
-    "topic": "/!/Stop",
+    "topic": "!/Stop",
     "description": "Stop polling or streaming on the channel.",
     "payload_schema": {}
 }
 
 CHANNEL_OUT_DATA_ENDPOINT_ARGS = {
-    "topic": "/<",
+    "topic": "<",
     "description": "Output data from the channel.",
     "default_qos": 0,
     "default_retain": False,
