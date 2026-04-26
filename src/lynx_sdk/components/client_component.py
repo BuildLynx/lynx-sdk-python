@@ -25,6 +25,8 @@ import paho.mqtt.client as mqtt
 
 # === CONSTANTS ===
 
+CONNECT_RETRY_INTERVAL: int = 5
+
 
 
 # === GLOBALS VARIABLES ===
@@ -122,13 +124,18 @@ class ClientComponent(Component):
         self.mqtt_client.set_on_message(self.no_endpoint_message)
         self.mqtt_client.set_on_connect(self.on_connect)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
+
+        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"offline"}}', qos=1, retain=True)
         
         # Connect to broker
-        try:
-            self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=60)
-        except ConnectionRefusedError as e:
-            self.logger.error(f"Failed to connect to MQTT broker, is the broker running?")
-            return
+        while True:
+            try:
+                self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=CONNECT_RETRY_INTERVAL)
+                break
+            except ConnectionRefusedError as e:
+                self.logger.error(f"Failed to connect to MQTT broker, is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
+                time.sleep(CONNECT_RETRY_INTERVAL)
+                continue
         
         # Start network loop
         self.mqtt_client.loop_start()

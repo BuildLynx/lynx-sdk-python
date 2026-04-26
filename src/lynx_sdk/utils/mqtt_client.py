@@ -191,6 +191,19 @@ class MqttClient:
             callback: Callback function for messages not matched by specific callbacks
         """
         self.client.on_message = callback
+    
+
+    def set_will(self, topic: str, payload: str, qos: int = 1, retain: bool = True) -> None:
+        """
+        Set the will message for the client.
+        
+        Args:
+            topic: MQTT topic to publish the will message to
+            payload: Payload to publish with the will message
+            qos: Quality of Service level (0, 1, or 2)
+            retain: Whether to retain the will message on the broker
+        """
+        self.client.will_set(topic=topic, payload=payload, qos=qos, retain=retain)
 
 
 # === MAIN LOOP ===
