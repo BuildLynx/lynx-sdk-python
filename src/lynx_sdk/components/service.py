@@ -118,7 +118,7 @@ class Service(ClientComponent):
                 stream_function=None,
                 output_data_schema=output_data_schema,
                 lynx_version=self.lynx_version)
-            self.channels[id] = new_channel
+            self.add_channel(new_channel)
             return new_channel
         return decorator
     
@@ -142,7 +142,7 @@ class Service(ClientComponent):
                 stream_function=stream_function,
                 output_data_schema=output_data_schema,
                 lynx_version=self.lynx_version)
-            self.channels[id] = new_channel
+            self.add_channel(new_channel)
             return new_channel
         return decorator
     
