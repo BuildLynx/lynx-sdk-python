@@ -199,7 +199,7 @@ class Service(ClientComponent):
         """
         Publish the about information to the MQTT broker.
         """
-        self.sys_about_endpoint.publish(payload=self.produce_about())
+        self.sys_about_endpoint.publish(payload=self.produce_about(), qos=1, retain=True)
     
 
 # === MAIN LOOP ===
