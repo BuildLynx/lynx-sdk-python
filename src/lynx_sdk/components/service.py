@@ -81,10 +81,10 @@ class Service(ClientComponent):
         self.channels: Dict[str, Channel] = {}
         
         # -Endpoints-
-        self.sys_about_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS, sub_handler=self.about_handler)
-        self.sys_notice_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
-        # all_endpoint_topics_set is not appended in Component.new_endpoint because we don't want Channels to have repeat endpoints
+        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(GET_ABOUT_ENDPOINT_ARGS, self.about_handler)
+        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(SYS_NOTICE_ENDPOINT_ARGS)
+        # all_endpoint_topics_set is not appended in Component._create_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
         
         # -Setup logging with notices-
@@ -99,7 +99,7 @@ class Service(ClientComponent):
         return self
     
     
-    def new_poll_channel(
+    def new_channel(
         self,
         id: str,
         title: str = "",
@@ -108,38 +108,13 @@ class Service(ClientComponent):
         """
         Create a new channel with a poll callback for the service.
         """
-        def decorator(poll_function: Callable):
+        def decorator(sample_function: Callable):
             new_channel = Channel(
                 id=id,
                 service=self,
                 title=title,
                 description=description,
-                poll_function=poll_function,
-                stream_function=None,
-                output_data_schema=output_data_schema,
-                lynx_version=self.lynx_version)
-            self.add_channel(new_channel)
-            return new_channel
-        return decorator
-    
-
-    def new_stream_channel(
-        self,
-        id: str,
-        title: str = "",
-        description: str = "",
-        output_data_schema: Optional[Dict] = None):
-        """
-        Create a new channel with a start stream callback for the service.
-        """
-        def decorator(stream_function: Callable):
-            new_channel = Channel(
-                id=id,
-                service=self,
-                title=title,
-                description=description,
-                poll_function=None,
-                stream_function=stream_function,
+                sample_function=sample_function,
                 output_data_schema=output_data_schema,
                 lynx_version=self.lynx_version)
             self.add_channel(new_channel)

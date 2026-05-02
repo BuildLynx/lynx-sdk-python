@@ -12,12 +12,12 @@ service = Service(
     description="Watches the device running this service and publishes statistics.")
 
 # -CPU Load-
-@service.new_poll_channel(
+@service.new_channel(
     "cpu_load",
     title="CPU Load",
     description="Polls the CPU load",
     output_data_schema={"load": {"type": "number", "unit": "%"}})
-def sample_cpu_load():
+def sample_cpu_load(req_payload: dict, continue_sampling: Callable):
     return {"load": psutil.cpu_percent(interval=1)}
     #TODO any exception will be caught by the Channel and published as an exception
 
@@ -31,7 +31,7 @@ def sample_cpu_load():
 
 
 # -Memory-
-def sample_memory_status():
+def sample_memory_status(req_payload: dict, continue_sampling: Callable):
     mem_info = psutil.virtual_memory()
     return {
         "total": mem_info.total,
@@ -72,9 +72,8 @@ memory_channel = Channel(
     service=service,
     title="RAM Status",
     description="RAM status of the system",
-    poll_function=sample_memory_status,
-    output_data_schema=MEMORY_CHANNEL_DATA_SCHEMA,
-    stream_function=None)
+    sample_function=sample_memory_status,
+    output_data_schema=MEMORY_CHANNEL_DATA_SCHEMA)
 
 
 service.add_channel(memory_channel)
@@ -102,7 +101,7 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def second_alert(req_payload: dict, continue_sampling: Callable, exit_flag: threading.Event):
+def second_alert(req_payload: dict, continue_sampling: Callable):
     import time
     last_second = None
     print("Second alert started")
@@ -126,9 +125,8 @@ second_channel = Channel(
     service=service,
     title="Second Alert",
     description="Emit the time every time the second changes",
-    poll_function=None,
     output_data_schema=SECOND_CHANNEL_DATA_SCHEMA,
-    stream_function=second_alert,
+    sample_function=second_alert,
     config={"streamOnStartup": False})
 
 service.add_channel(second_channel)
@@ -143,7 +141,7 @@ RANDOM_NUMBER_CHANNEL_DATA_SCHEMA = {
     }
 }
 
-def random_number_stream(req_payload: dict, continue_sampling: Callable, exit_flag: threading.Event):
+def random_number_stream(req_payload: dict, continue_sampling: Callable):
     import random
     while continue_sampling(interval_sec=1):
         yield {"number": random.randint(1, 3)}
@@ -154,9 +152,8 @@ service.add_channel(Channel(
     service=service,
     title="Random Number",
     description="Emit a random integer between 1 and 3",
-    poll_function=None,
     output_data_schema=RANDOM_NUMBER_CHANNEL_DATA_SCHEMA,
-    stream_function=random_number_stream,
+    sample_function=random_number_stream,
     config={"streamOnStartup": False}))
 
 

@@ -178,7 +178,7 @@ class Component(ABC):
         return self._status
     
     
-    def new_endpoint(self, 
+    def _create_endpoint(self, 
         endpoint_class: Type[Endpoint], 
         endpoint_args: Dict, 
         sub_handler: Optional[Callable] = None) -> Endpoint:
@@ -221,6 +221,23 @@ class Component(ABC):
         endpoint = endpoint_class(**endpoint_args)
         self.endpoints[endpoint.topic] = endpoint
         return endpoint
+    
+
+    def new_sub_endpoint(self,
+        endpoint_args: Dict,
+        sub_handler: Callable) -> SubEndpoint:
+        """
+        Create a new sub endpoint for this component from a dictionary of arguments.
+        """
+        return self._create_endpoint(SubEndpoint, endpoint_args, sub_handler)
+    
+
+    def new_pub_endpoint(self,
+        endpoint_args: Dict) -> SubEndpoint:
+        """
+        Create a new sub endpoint for this component from a dictionary of arguments.
+        """
+        return self._create_endpoint(PubEndpoint, endpoint_args)
 
     
 

@@ -117,10 +117,9 @@ class Channel(Component):
     def __init__(self,
         id: str,
         service: Service,
+        sample_function: Callable,
         title: str = "",
         description: str = "",
-        poll_function: Optional[Callable] = None,
-        stream_function: Optional[Callable] = None,
         output_data_schema: Optional[Dict] = None,
         config: Dict[str, Any] = {"streamOnStartup": False},
         lynx_version: str = LYNX_VERSION):
@@ -130,10 +129,9 @@ class Channel(Component):
         Args:
             id: Unique identifier for this channel
             service: Parent service this channel belongs to
+            sample_function: Function to call to sample data
             title: Human-readable title
             description: Human-readable description
-            poll_function: Function to call for polling data
-            start_stream_function: Function to call to start streaming data
             output_data_schema: JSON schema for the channel's output data
             config: Configuration for the channel
             lynx_version: Lynx protocol version
@@ -156,27 +154,20 @@ class Channel(Component):
         
         # -Channel-specific initialization-
         self.service: Service = service
-        self._poll_function: Optional[Callable] = poll_function
-        self._stream_function: Optional[Callable] = stream_function
+        self._sample_function: Callable = sample_function
         self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
 
-        if isinstance(poll_function, Callable):
-            self.cmd_poll_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_POLL_ENDPOINT_ARGS,
-                sub_handler=self.poll_handler)
-
-        if isinstance(stream_function, Callable):
-            self.cmd_stream_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STREAM_ENDPOINT_ARGS,
-                sub_handler=self.start_stream_handler)
-            self.cmd_stop_endpoint = self.new_endpoint(SubEndpoint, CHANNEL_CMD_STOP_ENDPOINT_ARGS,
-                sub_handler=self.stop_handler)
+        self.cmd_poll_endpoint = self.new_sub_endpoint(CHANNEL_CMD_POLL_ENDPOINT_ARGS, self.poll_handler)
+        self.cmd_stream_endpoint = self.new_sub_endpoint(CHANNEL_CMD_STREAM_ENDPOINT_ARGS, self.start_stream_handler)
+        self.cmd_stop_endpoint = self.new_sub_endpoint(CHANNEL_CMD_STOP_ENDPOINT_ARGS, self.stop_handler)
 
         if output_data_schema is not None:
             channel_out_data_schema = deepcopy(CHANNEL_OUT_DATA_ENDPOINT_ARGS)
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
-            self.out_data_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, channel_out_data_schema)
+            self.out_data_endpoint: PubEndpoint = self.new_pub_endpoint(channel_out_data_schema)
 
         self.config: Dict[str, Any] = config
-        if self.config.get("streamOnStartup", False) and isinstance(stream_function, Callable):
+        if self.config.get("streamOnStartup", False):
             self.start_stream_handler(payload={"contents": True, "numSamples": 0, "paginate": 1})
 
 
@@ -195,7 +186,7 @@ class Channel(Component):
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
-        data = self._poll_function()
+        data = self._sample_function(req_payload=payload, continue_sampling=lambda: True) # Assume true because we only sample once
         
         if contents is not True:
             try:
@@ -242,10 +233,10 @@ class Channel(Component):
         def continue_sampling(interval_sec: float):
             return not self._exit_flag.wait(timeout=interval_sec)
 
-        for data in self._stream_function(req_payload=req_payload, continue_sampling=continue_sampling, exit_flag=exit_flag):
+        for data in self._sample_function(req_payload=req_payload, continue_sampling=continue_sampling):
             if num_samples > 0 and samples_processed >= num_samples:
                 break
-            if exit_flag.wait(timeout=0.001):
+            if self._exit_flag.wait(timeout=0.001):
                 break
             payload_builder.add_data(data)
             samples_processed += 1

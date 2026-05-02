@@ -68,13 +68,13 @@ class Node(ClientComponent):
         self.broker_socket: Tuple[str, int] = broker_socket
         self.parent_node_socket: Optional[Tuple[str, int]] = parent_node_socket
         
-        self.sys_about_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, NODE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, GET_ABOUT_ENDPOINT_ARGS,
+        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(NODE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(GET_ABOUT_ENDPOINT_ARGS,
             lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
-        self.sys_notice_endpoint: PubEndpoint = self.new_endpoint(PubEndpoint, SYS_NOTICE_ENDPOINT_ARGS)
-        self.monitor_about_endpoint: SubEndpoint = self.new_endpoint(SubEndpoint, NODE_MONITOR_ABOUT_ENDPOINT_ARGS, self.handle_monitor_about_endpoint)
+        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(SYS_NOTICE_ENDPOINT_ARGS)
+        self.monitor_about_endpoint: SubEndpoint = self.new_sub_endpoint(NODE_MONITOR_ABOUT_ENDPOINT_ARGS, self.handle_monitor_about_endpoint)
 
-        # all_endpoint_topics_set is not appended in Component.new_endpoint because we don't want Channels to have repeat endpoints
+        # all_endpoint_topics_set is not appended in Component._create_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
         
         # -Setup logging with notices-
