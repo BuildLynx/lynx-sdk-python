@@ -42,12 +42,12 @@ class InboundMessage:
     """
     topic: str
     payload: Dict
-    sec: Optional[int]
-    nsec: Optional[int]
-    qos: int
-    retain: bool
-    raw: bytes
-    properties: Dict[str, str]
+    sec: Optional[int] = None
+    nsec: Optional[int] = None
+    qos: Optional[int] = None
+    retain: Optional[bool] = None
+    raw: Optional[bytes] = None
+    properties: Optional[Dict[str, str]] = None
 
 
 class MqttClient:
@@ -126,7 +126,6 @@ class MqttClient:
             publish_properties.UserProperty = (key, value)
         
         # Publish the message
-        print(f"Publishing message to topic {topic} with payload {payload} and properties {publish_properties}")
         message_info: mqtt.MQTTMessageInfo = self.client.publish(
             topic=topic,
             payload=orjson.dumps(payload),

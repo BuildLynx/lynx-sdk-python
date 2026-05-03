@@ -183,12 +183,11 @@ class Channel(Component):
         """
         Handle a poll request.
         """
-        payload = msg.payload
-        contents = payload.get("contents", True)
+        contents = msg.payload.get("contents", True)
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
-        data = self._sample_function(req_payload=payload, continue_sampling=lambda: True) # Assume true because we only sample once
+        data = self._sample_function(msg=msg, continue_sampling=lambda: True) # Assume true because we only sample once
         
         if contents is not True:
             try:
@@ -270,7 +269,7 @@ class Channel(Component):
         Produce a dictionary of information about the channel.
         """
         return {
-            "lynxType": "channel",
+            "lynxType": "Channel",
             "docs": {
                 "id": self.id,
                 "title": self.title,

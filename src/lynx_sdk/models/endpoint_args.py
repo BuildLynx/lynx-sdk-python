@@ -24,13 +24,12 @@ SYS_ABOUT_ENDPOINT_ARGS = {
     "description": "Publish information about the Component.",
     "default_qos": 1,
     "default_retain": True,
-    "validate_output_payload": False, # False so that we can emit payloads with hash strings if content is a hash string
     "payload_schema": {
         "lynxType": {
             "title": "Lynx Component Type",
             "description": "The type of the Lynx Component.",
             "type": "string",
-            "enum": ["node", "service", "channel"]
+            "enum": ["Node", "Service", "Channel"]
         },
         "docs": {
             "title": "Documentation",
@@ -150,9 +149,11 @@ NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
     }
 })
 
-NODE_MONITOR_ABOUT_ENDPOINT_ARGS = {
+SUBSCRIBE_ABOUT_ENDPOINT_ARGS = {
+    "skip_topic_prefixes": True,
     "topic": "+/@/About",
     "description": "Monitor about messages from child nodes and services.",
+    "payload_schema_additional_properties": True,
     "payload_schema": SYS_ABOUT_ENDPOINT_ARGS["payload_schema"]
 }
 

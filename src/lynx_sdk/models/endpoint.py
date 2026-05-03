@@ -52,6 +52,8 @@ class Endpoint:
         endpoint_direction: LynxEndpointDirection,
         component: Component,
         payload_schema: object,
+        skip_topic_prefixes: bool = False,
+        payload_schema_additional_properties: bool = False,
         description: str = ""):
         """
         Initialize a Lynx Endpoint object.
@@ -82,6 +84,7 @@ class Endpoint:
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
         self.component: Component = component
         self.payload_schema: object = payload_schema
+        self.payload_schema_additional_properties: bool = payload_schema_additional_properties
         self.description: str = description
 
 
@@ -91,7 +94,7 @@ class Endpoint:
         """
         client_component = self.component.get_client_component()
         try:
-            validate_json_object(payload_dict, self.payload_schema)
+            validate_json_object(payload_dict, self.payload_schema, additional_properties=self.payload_schema_additional_properties)
             return True
         except jsonschema.exceptions.ValidationError as e:
             client_component.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
@@ -122,6 +125,8 @@ class SubEndpoint(Endpoint):
         component: Component,
         payload_schema: object,
         description: str = "",
+        skip_topic_prefixes: bool = False,
+        payload_schema_additional_properties: bool = False,
         allow_run_while_busy: bool = True,):
         """
         Initialize a Lynx Subscribe Endpoint object.
@@ -139,7 +144,8 @@ class SubEndpoint(Endpoint):
             endpoint_direction=LynxEndpointDirection.SUB,
             component=component,
             payload_schema=payload_schema, 
-            description=description)
+            description=description,
+            payload_schema_additional_properties=payload_schema_additional_properties)
         self.handler: Callable[[InboundMessage], Optional[Any]] = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
         self.component.get_client_component().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
@@ -212,7 +218,8 @@ class PubEndpoint(Endpoint):
         description: str = "",
         default_qos: int = 0,
         default_retain: bool = False,
-        validate_output_payload: bool = True):
+        skip_topic_prefixes: bool = False,
+        payload_schema_additional_properties: bool = False):
         """
         Initialize a Lynx Publish Endpoint object.
         
@@ -229,10 +236,10 @@ class PubEndpoint(Endpoint):
             endpoint_direction=LynxEndpointDirection.PUB,
             component=component,
             payload_schema=payload_schema, 
-            description=description)
+            description=description,
+            payload_schema_additional_properties=payload_schema_additional_properties)
         self.default_qos: int = default_qos
         self.default_retain: bool = default_retain
-        self.validate_output_payload: bool = validate_output_payload
     
 
     def publish(
@@ -258,7 +265,7 @@ class PubEndpoint(Endpoint):
         if retain is None:
             retain = self.default_retain
         
-        if self.validate_output_payload and self.payload_schema is not None and len(payload) > 0:
+        if self.payload_schema is not None and len(payload) > 0:
             if not self.validate_payload(payload):
                 return
         

@@ -20,7 +20,7 @@ from lynx_sdk.models.endpoint_args import \
     GET_ABOUT_ENDPOINT_ARGS, \
     NODE_SYS_ABOUT_ENDPOINT_ARGS, \
     SYS_NOTICE_ENDPOINT_ARGS, \
-    NODE_MONITOR_ABOUT_ENDPOINT_ARGS
+    SUBSCRIBE_ABOUT_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
 from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.datastructures import deep_merge
@@ -64,16 +64,20 @@ class Node(ClientComponent):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            broker_socket=broker_socket)
+            broker_socket=broker_socket,
+            track_network_state=True)
         
         self.broker_socket: Tuple[str, int] = broker_socket
         self.parent_node_socket: Optional[Tuple[str, int]] = parent_node_socket
         
-        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(NODE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(GET_ABOUT_ENDPOINT_ARGS,
-            lambda msg: self.sys_about_endpoint.publish(payload=self.produce_about()))
-        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(SYS_NOTICE_ENDPOINT_ARGS)
-        self.monitor_about_endpoint: SubEndpoint = self.new_sub_endpoint(NODE_MONITOR_ABOUT_ENDPOINT_ARGS, self.handle_monitor_about_endpoint)
+        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(**NODE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(
+            lambda msg: self.sys_about_endpoint.publish(payload=self.produce_about()),
+            **GET_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
+        self.monitor_about_endpoint: SubEndpoint = self.new_sub_endpoint(
+            self.network_state.update_from_about_message,
+            **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
 
         # all_endpoint_topics_set is not appended in Component._create_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
@@ -83,7 +87,7 @@ class Node(ClientComponent):
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
         self.about_cache: Dict = {
-            "lynxType": "node",
+            "lynxType": "Node",
             "docs": {
                 "id": self.id,
                 "title": self.title,
@@ -105,26 +109,7 @@ class Node(ClientComponent):
         """
         Handle incoming About messages from child nodes and services.
         """
-        payload = msg.payload
-        sender_id = msg.topic.split("/", 1)[0]
-        if payload["lynxType"] == "service":
-            aligned_payload = {
-                "services": {
-                    sender_id: payload
-                }
-            }
-            self.about_cache = deep_merge(self.about_cache, aligned_payload)
-        elif payload["lynxType"] == "node":
-            aligned_payload = {
-                "child_nodes": {
-                    sender_id: payload
-                }
-            }
-            self.about_cache = deep_merge(self.about_cache, aligned_payload)
-        elif payload["lynxType"] == "channel":
-            self.logger.warning(f"Received channel about message on topic '{msg.topic}' from '{sender_id}', which is not supported by Node.")
-        else:
-            self.logger.warning(f"Received unknown lynxType in about message on topic '{msg.topic}' from '{sender_id}': {payload['lynxType']}")
+        
     
 
     def about_handler(self, msg: InboundMessage):

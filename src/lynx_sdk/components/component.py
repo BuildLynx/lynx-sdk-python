@@ -205,7 +205,9 @@ class Component(ABC):
         # Construct full topic path
         # Service endpoints: "service_id/?/About"
         # Channel endpoints: "service_id/channel_id/?/About"
-        if self.component_type == ComponentType.CHANNEL:
+        if endpoint_args.get("skip_topic_prefixes", False):
+            endpoint_args["topic"] = endpoint_args['topic']
+        elif self.component_type == ComponentType.CHANNEL:
             service: Service = self.get_client_component()
             endpoint_args["topic"] = f"{service.id}/{self.id}/{endpoint_args['topic']}"
         elif self.component_type == ComponentType.SERVICE:

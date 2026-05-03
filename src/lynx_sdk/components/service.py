@@ -10,22 +10,23 @@ a Time Source, an MQTT Client, and has its own Endpoints.
 # -stdlib Imports-
 from typing import Dict, Callable, Optional, Tuple
 import logging
-from copy import deepcopy
 
 # -Lynx Imports-
 from lynx_sdk.components.client_component import ClientComponent
 from lynx_sdk.components.component import ComponentType
 from lynx_sdk.components.channel import Channel
-from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.models.time_source import TimeSource
 from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     GET_ABOUT_ENDPOINT_ARGS, \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
-    SYS_NOTICE_ENDPOINT_ARGS
+    SYS_NOTICE_ENDPOINT_ARGS, \
+    SUBSCRIBE_ABOUT_ENDPOINT_ARGS
+from lynx_sdk.models.network_state import NetworkState
 from lynx_sdk.models.notice import LoggingNoticeHandler
 from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.utils.structures import LYNX_VERSION
 
 # -External Imports-
 
@@ -53,7 +54,8 @@ class Service(ClientComponent):
         lynx_version: str = LYNX_VERSION,
         time_source: Optional[TimeSource] = None,
         logger: Optional[logging.Logger] = None,
-        publish_logs_as_notices: bool = True):
+        publish_logs_as_notices: bool = True,
+        track_network_state: bool = False):
         """
         Initialize a Lynx Service object.
         
@@ -65,6 +67,7 @@ class Service(ClientComponent):
             time_source: Time source for timestamps (defaults to ideal source for platform)
             logger: Logger for this service (defaults to logger named after id)
             publish_logs_as_notices: Whether to publish log messages as notices to MQTT
+            track_network_state: Whether to track the network state for this service.
         """
 
         # Initialize Component base class
@@ -74,7 +77,10 @@ class Service(ClientComponent):
             component_type=ComponentType.SERVICE,
             title=title,
             description=description,
-            lynx_version=lynx_version
+            lynx_version=lynx_version,
+            time_source=time_source,
+            logger=logger,
+            track_network_state=track_network_state
         )
         
         # -Service-specific initialization-
@@ -91,6 +97,9 @@ class Service(ClientComponent):
         # -Setup logging with notices-
         if publish_logs_as_notices:
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
+
+        if track_network_state:
+            self.new_sub_endpoint(self.network_state.update_from_about_message, **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
 
 
     def get_client_component(self) -> ClientComponent:
@@ -154,7 +163,7 @@ class Service(ClientComponent):
         Produce a dictionary of information about the service.
         """
         return {
-            "lynxType": "service",
+            "lynxType": "Service",
             "docs": {
                 "id": self.id,
                 "title": self.title,

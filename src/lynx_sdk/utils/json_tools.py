@@ -131,7 +131,8 @@ def generate_full_data_schema(
 
 
 def wrap_json_in_object(
-    json_dict: Dict
+    json_dict: Dict,
+    additional_properties: bool = False,
     ) -> Dict:
     """
     Detects if provided json_dict is a JSON schema object (by looking for the type key). 
@@ -142,20 +143,22 @@ def wrap_json_in_object(
     else:
         return {
             "type": "object",
-            "properties": json_dict
+            "properties": json_dict,
+            "additionalProperties": additional_properties
         }
 
     
 def validate_json_object(
     json_object: Dict,
     json_schema: Dict,
-    validator: Optional["Validator"] = None
+    validator: Optional["Validator"] = None,
+    additional_properties: bool = False,
     ) -> bool:
     """
     Validate a JSON object against a JSON schema. By default, it uses the Draft 7 validator.
     Throws a jsonschema.exceptions.ValidationError if the JSON object does not match the schema.
     """
-    json_schema = generate_full_data_schema(json_schema)
+    json_schema = generate_full_data_schema(json_schema, additional_properties=additional_properties)
     
     # print(f"-----------------------:\n{json_object}\n{json_schema}\n")
     if validator is None:
@@ -165,13 +168,14 @@ def validate_json_object(
 
 def validate_json_schema(
     json_schema: Dict, 
-    validator: Optional["Validator"] = None
+    validator: Optional["Validator"] = None,
+    additional_properties: bool = False,
     ) -> bool:
     """
     Validate a JSON schema. By default, it uses the Draft 7 validator.
     Throws a jsonschema.exceptions.SchemaError if the JSON schema is invalid.
     """
-    json_schema = wrap_json_in_object(json_schema)
+    json_schema = wrap_json_in_object(json_schema, additional_properties=additional_properties)
     if validator is None:
         validator = jsonschema.Draft7Validator(json_schema)
     validator.check_schema(json_schema)
