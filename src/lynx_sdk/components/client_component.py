@@ -118,7 +118,11 @@ class ClientComponent(Component):
         try:
             self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
             self.publish_about()
-            self.mqtt_client.subscribe("#")
+            subscribe_topic_filter = f"{self.id}/#"
+            print(self.client_endpoint_topics_set)
+            if any(not topic.startswith(f"{self.id}/") for topic in self.client_endpoint_topics_set):
+                subscribe_topic_filter = "#"
+            self.mqtt_client.subscribe(subscribe_topic_filter)
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
