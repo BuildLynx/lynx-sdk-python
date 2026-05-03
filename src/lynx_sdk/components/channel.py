@@ -158,14 +158,14 @@ class Channel(Component):
         self._sample_function: Callable[[InboundMessage], Any] = sample_function
         self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
 
-        self.cmd_poll_endpoint = self.new_sub_endpoint(CHANNEL_CMD_POLL_ENDPOINT_ARGS, self.poll_handler)
-        self.cmd_stream_endpoint = self.new_sub_endpoint(CHANNEL_CMD_STREAM_ENDPOINT_ARGS, self.start_stream_handler)
-        self.cmd_stop_endpoint = self.new_sub_endpoint(CHANNEL_CMD_STOP_ENDPOINT_ARGS, self.stop_handler)
+        self.cmd_poll_endpoint = self.new_sub_endpoint(self.poll_handler, **CHANNEL_CMD_POLL_ENDPOINT_ARGS)
+        self.cmd_stream_endpoint = self.new_sub_endpoint(self.start_stream_handler, **CHANNEL_CMD_STREAM_ENDPOINT_ARGS)
+        self.cmd_stop_endpoint = self.new_sub_endpoint(self.stop_handler, **CHANNEL_CMD_STOP_ENDPOINT_ARGS)
 
         if output_data_schema is not None:
             channel_out_data_schema = deepcopy(CHANNEL_OUT_DATA_ENDPOINT_ARGS)
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
-            self.out_data_endpoint: PubEndpoint = self.new_pub_endpoint(channel_out_data_schema)
+            self.out_data_endpoint: PubEndpoint = self.new_pub_endpoint(**channel_out_data_schema)
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):

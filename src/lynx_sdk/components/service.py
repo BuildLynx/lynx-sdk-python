@@ -82,9 +82,9 @@ class Service(ClientComponent):
         self.channels: Dict[str, Channel] = {}
         
         # -Endpoints-
-        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(GET_ABOUT_ENDPOINT_ARGS, self.about_handler)
-        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(SYS_NOTICE_ENDPOINT_ARGS)
+        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(**SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(self.about_handler, **GET_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
         # all_endpoint_topics_set is not appended in Component._create_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys())) 
         

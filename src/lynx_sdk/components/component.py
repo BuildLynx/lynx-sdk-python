@@ -180,8 +180,8 @@ class Component(ABC):
     
     def _create_endpoint(self, 
         endpoint_class: Type[Endpoint], 
-        endpoint_args: Dict, 
-        sub_handler: Optional[Callable] = None) -> Endpoint:
+        sub_handler: Optional[Callable] = None,
+        **endpoint_args: Dict) -> Endpoint:
         """
         Create a new endpoint for this component from a dictionary of arguments.
         
@@ -224,20 +224,20 @@ class Component(ABC):
     
 
     def new_sub_endpoint(self,
-        endpoint_args: Dict,
-        sub_handler: Callable) -> SubEndpoint:
+        sub_handler: Callable,
+        **endpoint_args: Dict) -> SubEndpoint:
         """
         Create a new sub endpoint for this component from a dictionary of arguments.
         """
-        return self._create_endpoint(SubEndpoint, endpoint_args, sub_handler)
+        return self._create_endpoint(SubEndpoint, sub_handler, **endpoint_args)
     
 
     def new_pub_endpoint(self,
-        endpoint_args: Dict) -> SubEndpoint:
+        **endpoint_args: Dict) -> SubEndpoint:
         """
         Create a new sub endpoint for this component from a dictionary of arguments.
         """
-        return self._create_endpoint(PubEndpoint, endpoint_args)
+        return self._create_endpoint(PubEndpoint, **endpoint_args)
 
     
 

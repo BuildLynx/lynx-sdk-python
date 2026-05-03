@@ -107,8 +107,6 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
 def second_alert(request: InboundMessage, continue_sampling: Callable):
     import time
     last_second = None
-    print("Second alert started")
-
     while continue_sampling(default_interval=0.01):
         current_second = time.localtime().tm_sec
         if current_second != last_second:
@@ -119,8 +117,6 @@ def second_alert(request: InboundMessage, continue_sampling: Callable):
             }
             last_second = current_second
             yield data
-    
-    print("Second alert stopped")
 
 
 second_channel = Channel(
