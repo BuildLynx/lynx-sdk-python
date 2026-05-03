@@ -1,6 +1,7 @@
 from typing import Callable
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.components.service import Service
+from lynx_sdk.utils.mqtt_client import InboundMessage
 
 import psutil
 import threading
@@ -17,8 +18,9 @@ service = Service(
     title="CPU Load",
     description="Polls the CPU load",
     output_data_schema={"load": {"type": "number", "unit": "%"}})
-def sample_cpu_load(req_payload: dict, continue_sampling: Callable):
-    return {"load": psutil.cpu_percent(interval=1)}
+def sample_cpu_load(request: InboundMessage, continue_sampling: Callable):
+    while continue_sampling(default_interval=0.01):
+        yield {"load": psutil.cpu_percent(interval=1)}
     #TODO any exception will be caught by the Channel and published as an exception
 
 
@@ -31,14 +33,15 @@ def sample_cpu_load(req_payload: dict, continue_sampling: Callable):
 
 
 # -Memory-
-def sample_memory_status(req_payload: dict, continue_sampling: Callable):
-    mem_info = psutil.virtual_memory()
-    return {
-        "total": mem_info.total,
-        "used": mem_info.used,
-        "free": mem_info.free,
-        "percent": mem_info.percent
-    }
+def sample_memory_status(request: InboundMessage, continue_sampling: Callable):
+    while continue_sampling():
+        mem_info = psutil.virtual_memory()
+        yield {
+            "total": mem_info.total,
+            "used": mem_info.used,
+            "free": mem_info.free,
+            "percent": mem_info.percent
+        }
 
 MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
     "total": {
@@ -101,12 +104,12 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def second_alert(req_payload: dict, continue_sampling: Callable):
+def second_alert(request: InboundMessage, continue_sampling: Callable):
     import time
     last_second = None
     print("Second alert started")
 
-    while continue_sampling(interval_sec=0.01):
+    while continue_sampling(default_interval=0.01):
         current_second = time.localtime().tm_sec
         if current_second != last_second:
             data = {
@@ -141,9 +144,9 @@ RANDOM_NUMBER_CHANNEL_DATA_SCHEMA = {
     }
 }
 
-def random_number_stream(req_payload: dict, continue_sampling: Callable):
+def random_number_stream(request: InboundMessage, continue_sampling: Callable):
     import random
-    while continue_sampling(interval_sec=1):
+    while continue_sampling(default_interval=1):
         yield {"number": random.randint(1, 3)}
 
 

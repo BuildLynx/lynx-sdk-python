@@ -155,7 +155,7 @@ class Channel(Component):
         
         # -Channel-specific initialization-
         self.service: Service = service
-        self._sample_function: Callable = sample_function
+        self._sample_function: Callable[[InboundMessage], Any] = sample_function
         self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
 
         self.cmd_poll_endpoint = self.new_sub_endpoint(CHANNEL_CMD_POLL_ENDPOINT_ARGS, self.poll_handler)
@@ -169,7 +169,7 @@ class Channel(Component):
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):
-            self._start_stream(payload={"contents": True, "numSamples": 0, "paginate": 1})
+            self.start_stream_handler(msg=InboundMessage(payload={"contents": True, "numSamples": 0, "paginate": 1}))
 
 
     def get_client_component(self) -> ClientComponent:
@@ -204,13 +204,6 @@ class Channel(Component):
 
     def start_stream_handler(self, msg: InboundMessage):
         """
-        Handle a stream start request from a subscribed endpoint message.
-        """
-        self._start_stream(payload=msg.payload)
-
-
-    def _start_stream(self, payload: Dict):
-        """
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
         """
@@ -218,6 +211,7 @@ class Channel(Component):
             self.service.logger.warning(f"Channel '{self.id}' is not idle, ignoring stream start request.")
             return
         
+        payload = msg.payload
         contents = payload.get("contents", True)
         num_samples = payload.get("numSamples", 0)
         paginate = payload.get("paginate", num_samples)
@@ -228,21 +222,29 @@ class Channel(Component):
 
         self._exit_flag = threading.Event() # Create a new exit flag for this streaming session
         payload_builder = PayloadBuilder(contents=contents, paginate=paginate, out_data_endpoint=self.out_data_endpoint, service=self.service)
-        stream_thread = threading.Thread(target=self._stream_handler, kwargs={"req_payload": payload, "payload_builder": payload_builder, "num_samples": num_samples, "exit_flag": self._exit_flag})
+        stream_thread = threading.Thread(target=self._stream_handler, kwargs={"request": msg, "payload_builder": payload_builder, "num_samples": num_samples})
         stream_thread.start()
 
     
-    def _stream_handler(self, req_payload: Dict, payload_builder: PayloadBuilder, num_samples: int, exit_flag: threading.Event):
+    def _stream_handler(self, request: Dict, payload_builder: PayloadBuilder, num_samples: int):
         """
         Handle a stream request.
         """
-        self.set_status(state=ComponentState.BUSY, action={"command": "Stream", "payload": req_payload})
+        self.set_status(state=ComponentState.BUSY, action={"command": "Stream", "payload": request.payload})
         samples_processed = 0
 
-        def continue_sampling(interval_sec: float):
-            return not self._exit_flag.wait(timeout=interval_sec)
+        def continue_sampling(default_interval: float = 1.0):
+            """
+            Determine if the sampling should continue based on the default interval.
+            Args:
+                default_interval: The default timeout interval in seconds if none is specified in stream request message.
+            Returns:
+                True if the sampling should continue, False otherwise.
+            """
+            interval = request.payload.get("interval", default_interval)
+            return not self._exit_flag.wait(timeout=interval)
 
-        for data in self._sample_function(req_payload=req_payload, continue_sampling=continue_sampling):
+        for data in self._sample_function(request=request, continue_sampling=continue_sampling):
             if num_samples > 0 and samples_processed >= num_samples:
                 break
             if self._exit_flag.wait(timeout=0.001):
