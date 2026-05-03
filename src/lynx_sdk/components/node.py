@@ -22,6 +22,7 @@ from lynx_sdk.models.endpoint_args import \
     SYS_NOTICE_ENDPOINT_ARGS, \
     NODE_MONITOR_ABOUT_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
+from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.datastructures import deep_merge
 from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
 
@@ -70,7 +71,7 @@ class Node(ClientComponent):
         
         self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(NODE_SYS_ABOUT_ENDPOINT_ARGS)
         self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(GET_ABOUT_ENDPOINT_ARGS,
-            lambda args: self.sys_about_endpoint.publish(payload=self.produce_about()))
+            lambda msg: self.sys_about_endpoint.publish(payload=self.produce_about()))
         self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(SYS_NOTICE_ENDPOINT_ARGS)
         self.monitor_about_endpoint: SubEndpoint = self.new_sub_endpoint(NODE_MONITOR_ABOUT_ENDPOINT_ARGS, self.handle_monitor_about_endpoint)
 
@@ -100,35 +101,39 @@ class Node(ClientComponent):
         }
     
     
-    def handle_monitor_about_endpoint(self, payload: Dict):
+    def handle_monitor_about_endpoint(self, msg: InboundMessage):
         """
         Handle incoming About messages from child nodes and services.
         """
+        payload = msg.payload
+        sender_id = msg.topic.split("/", 1)[0]
         if payload["lynxType"] == "service":
             aligned_payload = {
                 "services": {
-                    payload["docs"]["id"]: payload
+                    sender_id: payload
                 }
             }
             self.about_cache = deep_merge(self.about_cache, aligned_payload)
         elif payload["lynxType"] == "node":
             aligned_payload = {
                 "child_nodes": {
-                    payload["docs"]["id"]: payload
+                    sender_id: payload
                 }
             }
             self.about_cache = deep_merge(self.about_cache, aligned_payload)
         elif payload["lynxType"] == "channel":
-            self.logger.warning(f"Received channel about message from {payload['id']}, which is not supported by Node.")
+            self.logger.warning(f"Received channel about message on topic '{msg.topic}' from '{sender_id}', which is not supported by Node.")
         else:
-            self.logger.warning(f"Received unknown lynxType in about message. {payload['id']}: {payload['lynxType']}")
+            self.logger.warning(f"Received unknown lynxType in about message on topic '{msg.topic}' from '{sender_id}': {payload['lynxType']}")
     
 
-    def about_handler(self, payload: Dict):
+    def about_handler(self, msg: InboundMessage):
         """
         Handle incoming About messages from the service.
         """
+        payload = msg.payload
         contents = payload.get("contents", True)
+        outgoing_payload = self.produce_about()
         if contents is not True:
             try:
                 outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)

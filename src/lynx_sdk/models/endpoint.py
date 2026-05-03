@@ -12,7 +12,7 @@ from logging import Logger, getLogger
 from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
 from enum import Enum
 
-from lynx_sdk.utils.mqtt_client import MqttClient
+from lynx_sdk.utils.mqtt_client import MqttClient, InboundMessage
 
 # -Lynx Imports-
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ class Endpoint:
 class SubEndpoint(Endpoint):
     def __init__(self,
         topic: str,
-        handler: Callable,
+        handler: Callable[[InboundMessage], Optional[Any]],
         component: Component,
         payload_schema: object,
         description: str = "",
@@ -140,7 +140,7 @@ class SubEndpoint(Endpoint):
             component=component,
             payload_schema=payload_schema, 
             description=description)
-        self.handler: Callable = handler
+        self.handler: Callable[[InboundMessage], Optional[Any]] = handler
         self.allow_run_while_busy: bool = allow_run_while_busy
         self.component.get_client_component().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
@@ -152,7 +152,7 @@ class SubEndpoint(Endpoint):
         This method:
         1. Parses the MQTT payload bytes as JSON
         2. Validates the payload against the schema (if one exists)
-        3. Calls the handler function with the parsed dictionary
+        3. Builds an InboundMessage and calls the handler
         4. Handles errors gracefully with logging
         
         Args:
@@ -188,9 +188,10 @@ class SubEndpoint(Endpoint):
                     # TODO - consider returning an error message or publishing to an error topic instead of just returning None
                     return
 
-            # Call the handler with the parsed dictionary
+            # Build contextual message and call the handler
             try:
-                return self.handler(payload)
+                incoming_message = MqttClient.from_paho_message(message=message, payload=payload)
+                return self.handler(incoming_message)
             except Exception as e:
                 client_component.logger.exception(
                     f"Handler exception for endpoint '{self.topic}': "

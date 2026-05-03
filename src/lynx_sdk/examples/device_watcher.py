@@ -13,7 +13,7 @@ service = Service(
 
 # -CPU Load-
 @service.new_channel(
-    "cpu_load",
+    "cpuLoad",
     title="CPU Load",
     description="Polls the CPU load",
     output_data_schema={"load": {"type": "number", "unit": "%"}})

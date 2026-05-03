@@ -24,6 +24,7 @@ from lynx_sdk.models.endpoint_args import \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
     SYS_NOTICE_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
+from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
 
 # -External Imports-
@@ -132,11 +133,13 @@ class Service(ClientComponent):
         self.client_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
 
 
-    def about_handler(self, payload: Dict):
+    def about_handler(self, msg: InboundMessage):
         """
         Handle incoming About messages from the service.
         """
+        payload = msg.payload
         contents = payload.get("contents", True)
+        outgoing_payload = self.produce_about()
         if contents is not True:
             try:
                 outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)

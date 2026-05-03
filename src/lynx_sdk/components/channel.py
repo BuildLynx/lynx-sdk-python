@@ -26,6 +26,7 @@ from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_STOP_ENDPOINT_ARGS, \
     CHANNEL_OUT_DATA_ENDPOINT_ARGS
 from lynx_sdk.utils.json_tools import validate_json_schema, trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.structures import LYNX_VERSION
 
 if TYPE_CHECKING:
@@ -168,7 +169,7 @@ class Channel(Component):
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):
-            self.start_stream_handler(payload={"contents": True, "numSamples": 0, "paginate": 1})
+            self._start_stream(payload={"contents": True, "numSamples": 0, "paginate": 1})
 
 
     def get_client_component(self) -> ClientComponent:
@@ -178,10 +179,11 @@ class Channel(Component):
         return self.service
 
 
-    def poll_handler(self, payload: Dict):
+    def poll_handler(self, msg: InboundMessage):
         """
         Handle a poll request.
         """
+        payload = msg.payload
         contents = payload.get("contents", True)
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
@@ -200,7 +202,14 @@ class Channel(Component):
         self.out_data_endpoint.publish(payload=payload)
 
 
-    def start_stream_handler(self, payload: Dict):
+    def start_stream_handler(self, msg: InboundMessage):
+        """
+        Handle a stream start request from a subscribed endpoint message.
+        """
+        self._start_stream(payload=msg.payload)
+
+
+    def _start_stream(self, payload: Dict):
         """
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
@@ -247,7 +256,7 @@ class Channel(Component):
         self.set_status(state=ComponentState.IDLE, action={"command": "", "payload": {}})
 
 
-    def stop_handler(self, payload: Dict):
+    def stop_handler(self, msg: InboundMessage):
         """
         Stop the channel's polling/streaming.
         """

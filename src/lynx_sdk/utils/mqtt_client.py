@@ -7,6 +7,7 @@ MQTT Client wrapper for Lynx. Provides a unified interface for MQTT operations.
 # === IMPORTS ===
 
 # -stdlib Imports-
+from dataclasses import dataclass
 from typing import Dict, Optional, Any, Callable
 
 # -Lynx Imports-
@@ -33,6 +34,21 @@ import orjson
 
 
 #  === CLASSES ===
+
+@dataclass
+class InboundMessage:
+    """
+    Normalized inbound MQTT message passed to Lynx SubEndpoint handlers.
+    """
+    topic: str
+    payload: Dict
+    sec: Optional[int]
+    nsec: Optional[int]
+    qos: int
+    retain: bool
+    raw: bytes
+    properties: Dict[str, str]
+
 
 class MqttClient:
     """
@@ -204,6 +220,46 @@ class MqttClient:
             retain: Whether to retain the will message on the broker
         """
         self.client.will_set(topic=topic, payload=payload, qos=qos, retain=retain)
+
+
+    @staticmethod
+    def from_paho_message(message: mqtt.MQTTMessage, payload: Dict) -> InboundMessage:
+        """
+        Build an InboundMessage from a paho MQTTMessage and parsed payload.
+        """
+        sec: Optional[int] = None
+        nsec: Optional[int] = None
+        parsed_properties: Dict[str, str] = {}
+
+        message_properties = getattr(message, "properties", None)
+        user_properties = getattr(message_properties, "UserProperty", None)
+        if user_properties is None:
+            user_properties = []
+
+        for key, value in user_properties:
+            if key == "s":
+                try:
+                    sec = int(value)
+                except (TypeError, ValueError):
+                    parsed_properties[str(key)] = str(value)
+            elif key == "ns":
+                try:
+                    nsec = int(value)
+                except (TypeError, ValueError):
+                    parsed_properties[str(key)] = str(value)
+            else:
+                parsed_properties[str(key)] = str(value)
+
+        return InboundMessage(
+            topic=str(message.topic),
+            payload=payload,
+            sec=sec,
+            nsec=nsec,
+            qos=message.qos,
+            retain=message.retain,
+            raw=bytes(message.payload),
+            properties=parsed_properties
+        )
 
 
 # === MAIN LOOP ===
