@@ -156,7 +156,7 @@ class Channel(Component):
         # -Channel-specific initialization-
         self.service: Service = service
         self._sample_function: Callable[[InboundMessage], Any] = sample_function
-        self._exit_flag: Optional[threading.Event] = None # Flag to signal polling/streaming thread to exit
+        self._exit_flag: threading.Event = threading.Event() # Flag to signal polling/streaming thread to exit
 
         self.cmd_poll_endpoint = self.new_sub_endpoint(self.poll_handler, **CHANNEL_CMD_POLL_ENDPOINT_ARGS)
         self.cmd_stream_endpoint = self.new_sub_endpoint(self.start_stream_handler, **CHANNEL_CMD_STREAM_ENDPOINT_ARGS)
@@ -217,7 +217,7 @@ class Channel(Component):
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
-        self._exit_flag = threading.Event() # Create a new exit flag for this streaming session
+        self._exit_flag.clear()
         payload_builder = PayloadBuilder(contents=contents, paginate=paginate, out_data_endpoint=self.out_data_endpoint, service=self.service)
         stream_thread = threading.Thread(target=self._stream_handler, kwargs={"request": msg, "payload_builder": payload_builder, "num_samples": num_samples})
         stream_thread.start()
@@ -251,7 +251,6 @@ class Channel(Component):
     
         payload_builder.publish()
         self._exit_flag.set()
-        self._exit_flag = None
         self.set_status(state=ComponentState.IDLE, action={"command": "", "payload": {}})
 
 
@@ -259,9 +258,7 @@ class Channel(Component):
         """
         Stop the channel's polling/streaming.
         """
-        if self._exit_flag is not None:
-            self._exit_flag.set()
-            self._exit_flag = None
+        self._exit_flag.set()
 
 
     def produce_about(self) -> Dict:
