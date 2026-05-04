@@ -160,6 +160,16 @@ class MqttClient:
         """
         self.client.message_callback_add(topic, callback)
     
+
+    def remove_callback(self, topic: str) -> None:
+        """
+        Remove a message callback for a specific topic.
+        
+        Args:
+            topic: MQTT topic or topic filter
+        """
+        self.client.message_callback_remove(topic)
+    
     
     def connect(self, host: str, port: int = 1883, keepalive: int = 60) -> None:
         """

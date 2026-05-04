@@ -117,12 +117,13 @@ class ClientComponent(Component):
         """
         try:
             self.logger.debug(f"Connected to MQTT broker with result code {reason_code}")
-            self.publish_about()
             subscribe_topic_filter = f"{self.id}/#"
-            print(self.client_endpoint_topics_set)
             if any(not topic.startswith(f"{self.id}/") for topic in self.client_endpoint_topics_set):
                 subscribe_topic_filter = "#"
             self.mqtt_client.subscribe(subscribe_topic_filter)
+            
+            self.publish_about()
+            self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
@@ -143,8 +144,6 @@ class ClientComponent(Component):
         self.mqtt_client.set_on_message(self.no_endpoint_message)
         self.mqtt_client.set_on_connect(self.on_connect)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
-
-        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         
         # Connect to broker
         while True:

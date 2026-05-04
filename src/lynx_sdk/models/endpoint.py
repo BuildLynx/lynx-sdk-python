@@ -52,7 +52,6 @@ class Endpoint:
         endpoint_direction: LynxEndpointDirection,
         component: Component,
         payload_schema: object,
-        skip_topic_prefixes: bool = False,
         payload_schema_additional_properties: bool = False,
         description: str = ""):
         """
@@ -125,7 +124,6 @@ class SubEndpoint(Endpoint):
         component: Component,
         payload_schema: object,
         description: str = "",
-        skip_topic_prefixes: bool = False,
         payload_schema_additional_properties: bool = False,
         allow_run_while_busy: bool = True,):
         """
@@ -218,7 +216,6 @@ class PubEndpoint(Endpoint):
         description: str = "",
         default_qos: int = 0,
         default_retain: bool = False,
-        skip_topic_prefixes: bool = False,
         payload_schema_additional_properties: bool = False):
         """
         Initialize a Lynx Publish Endpoint object.

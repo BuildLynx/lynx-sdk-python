@@ -185,20 +185,18 @@ class Channel(Component):
         """
         contents = msg.payload.get("contents", True)
 
-        #TODO - validate the contents dict against the endpoint's schema before starting the stream
+        for data in self._sample_function(request=msg, continue_sampling=lambda **kwargs: True): # Assume true because we only sample once
+            if contents is not True:
+                try:
+                    data = trim_payload_by_contents(data, contents)
+                except PayloadBuildingError as e:
+                    self.service.logger.error(f"Error trimming payload: {e.message}")
+                    return
+            payload = [{"s": 0, "ns": 0, "data": data}]
 
-        data = self._sample_function(msg=msg, continue_sampling=lambda: True) # Assume true because we only sample once
+            self.out_data_endpoint.publish(payload=payload)
+            break
         
-        if contents is not True:
-            try:
-                data = trim_payload_by_contents(data, contents)
-            except PayloadBuildingError as e:
-                self.service.logger.error(f"Error trimming payload: {e.message}")
-                return
-        
-        payload = [{"s": 0, "ns": 0, "data": data}]
-
-        self.out_data_endpoint.publish(payload=payload)
 
 
     def start_stream_handler(self, msg: InboundMessage):
@@ -225,7 +223,7 @@ class Channel(Component):
         stream_thread.start()
 
     
-    def _stream_handler(self, request: Dict, payload_builder: PayloadBuilder, num_samples: int):
+    def _stream_handler(self, request: InboundMessage, payload_builder: PayloadBuilder, num_samples: int):
         """
         Handle a stream request.
         """
@@ -261,7 +259,9 @@ class Channel(Component):
         """
         Stop the channel's polling/streaming.
         """
-        self._exit_flag.set()
+        if self._exit_flag is not None:
+            self._exit_flag.set()
+            self._exit_flag = None
 
 
     def produce_about(self) -> Dict:

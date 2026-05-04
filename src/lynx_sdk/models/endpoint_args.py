@@ -14,7 +14,7 @@ GET_ABOUT_ENDPOINT_ARGS = {
             "title": "contents Object",
             "description": "Refer to Lynx standard contents argument for details.",
             "default": {},
-            "type": "object"
+            "type": ["object", "boolean"]
         }
     }
 }

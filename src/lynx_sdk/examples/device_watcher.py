@@ -19,8 +19,8 @@ service = Service(
     description="Polls the CPU load",
     output_data_schema={"load": {"type": "number", "unit": "%"}})
 def sample_cpu_load(request: InboundMessage, continue_sampling: Callable):
-    while continue_sampling(default_interval=0.01):
-        yield {"load": psutil.cpu_percent(interval=1)}
+    while continue_sampling(default_interval=0.5):
+        yield {"load": psutil.cpu_percent(interval=0.1)}
     #TODO any exception will be caught by the Channel and published as an exception
 
 
