@@ -211,7 +211,7 @@ class Channel(Component):
         payload = msg.payload
         contents = payload.get("contents", True)
         num_samples = payload.get("numSamples", 0)
-        paginate = payload.get("paginate", num_samples)
+        paginate = payload.get("paginate", 1)
         if paginate == 0:
             paginate = num_samples
 

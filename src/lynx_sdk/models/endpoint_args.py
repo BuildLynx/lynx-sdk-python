@@ -208,8 +208,8 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
         },
         "paginate": {
             "title": "Paginate",
-            "description": "0 for no pagination, positive int for page size, default 0",
-            "default": 0,
+            "description": "0 for no pagination (all data in one payload), positive int for page size, default 1",
+            "default": 1,
             "type": "integer",
             "minimum": 0
         }
