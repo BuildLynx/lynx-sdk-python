@@ -123,7 +123,6 @@ class ClientComponent(Component):
             self.mqtt_client.subscribe(subscribe_topic_filter)
             
             self.publish_about()
-            self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
@@ -143,9 +142,12 @@ class ClientComponent(Component):
         # Set default callbacks
         self.mqtt_client.set_on_message(self.no_endpoint_message)
         self.mqtt_client.set_on_connect(self.on_connect)
+
+        # Set will message and disconnect callback
+        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
         
-        # Connect to broker
+        # Attempt to connect to broker
         while True:
             try:
                 self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=CONNECT_RETRY_INTERVAL)

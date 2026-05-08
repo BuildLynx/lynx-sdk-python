@@ -169,7 +169,7 @@ class Channel(Component):
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):
-            self.start_stream_handler(msg=InboundMessage(payload={"contents": True, "numSamples": 0, "paginate": 1}))
+            self.start_stream_handler(msg=InboundMessage(topic="", payload={"contents": True, "numSamples": 0, "paginate": 1}))
 
 
     def get_client_component(self) -> ClientComponent:
@@ -283,8 +283,7 @@ class Channel(Component):
 
     def set_status(self, 
         state: Optional[ComponentState] = None, 
-        action: Optional[Dict[str, Any]] = None, 
-        about_endpoint: Optional[PubEndpoint] = None) -> Dict[str, Any]:
+        action: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Set the status of the channel.
         """

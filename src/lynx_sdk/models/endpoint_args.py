@@ -4,6 +4,7 @@ This module provides the arguments for the endpoints for components including Co
 
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.utils.datastructures import deep_merge
+from lynx_sdk.models.notice import NoticeSeverity
 
 # -Component Endpoints-
 GET_ABOUT_ENDPOINT_ARGS = {
@@ -115,10 +116,15 @@ SYS_NOTICE_ENDPOINT_ARGS = {
             "type": "string"
         },
         "severity": {
-            "title": "Action",
-            "description": "The action of the notice.",
+            "title": "Severity",
+            "description": "The severity of the notice.",
             "type": "string",
-            "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+            "enum": [
+                NoticeSeverity.DEBUG.name, 
+                NoticeSeverity.INFO.name, 
+                NoticeSeverity.WARNING.name, 
+                NoticeSeverity.ERROR.name, 
+                NoticeSeverity.CRITICAL.name]
         },
         "message": {
             "title": "Message",
@@ -127,7 +133,7 @@ SYS_NOTICE_ENDPOINT_ARGS = {
         },
         "data": {
             "title": "Data",
-            "description": "The data of the notice. Will ofteb be empty.",
+            "description": "The data of the notice. Will often be empty.",
             "type": "object"
         }
     }
@@ -171,7 +177,7 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 # -Channel Endpoints-
 CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "topic": "!/Poll",
-    "description": "Start polling at a set time intervalon the channel for data.",
+    "description": "Start polling at a set time interval on the channel for data.",
     "payload_schema": {
         "contents": {
             "title": "Values to contents",
