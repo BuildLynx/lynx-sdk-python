@@ -47,7 +47,6 @@ from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingE
 class Node(ClientComponent):
     def __init__(self,
         id: str,
-        broker_socket: Tuple[str, int],
         title: str = "",
         description: str = "",
         lynx_version: str = LYNX_VERSION,
@@ -64,10 +63,8 @@ class Node(ClientComponent):
             lynx_version=lynx_version,
             time_source=time_source,
             logger=logger,
-            broker_socket=broker_socket,
             track_network_state=True)
         
-        self.broker_socket: Tuple[str, int] = broker_socket
         self.parent_node_socket: Optional[Tuple[str, int]] = parent_node_socket
         
         self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(**NODE_SYS_ABOUT_ENDPOINT_ARGS)
@@ -103,13 +100,6 @@ class Node(ClientComponent):
             "services": {},
             "child_nodes": {}
         }
-    
-    
-    def handle_monitor_about_endpoint(self, msg: InboundMessage):
-        """
-        Handle incoming About messages from child nodes and services.
-        """
-        
     
 
     def about_handler(self, msg: InboundMessage):

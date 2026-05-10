@@ -7,8 +7,11 @@ Client Component base class for Lynx. A Client Component is a component that has
 # === IMPORTS ===
 
 # -stdlib Imports-
+import json
 import logging
+import os
 from typing import Dict, Any, abstractmethod, Optional, Tuple
+from pathlib import Path
 import time
 import sys
 
@@ -26,6 +29,7 @@ import paho.mqtt.client as mqtt
 # === CONSTANTS ===
 
 CONNECT_RETRY_INTERVAL: int = 5
+_CONF_FILENAME = "lynxConf.json"
 
 
 
@@ -35,6 +39,31 @@ CONNECT_RETRY_INTERVAL: int = 5
 
 # === FUNCTIONS ===
 
+def _resolve_broker_socket() -> Tuple[str, int]:
+    """
+    Resolve the MQTT broker (host, port) using the following priority:
+      1. UPSTREAM_NODE_HOST / UPSTREAM_NODE_PORT environment variables
+      2. UpstreamNodeHost / UpstreamNodePort from lynxConf.json (searched in cwd)
+      3. ("localhost", 1883)
+    """
+    env_host = os.environ.get("UPSTREAM_NODE_HOST")
+    if env_host is not None:
+        port = int(os.environ.get("UPSTREAM_NODE_PORT", "1883"))
+        return (env_host, port)
+
+    conf_path = Path.cwd() / _CONF_FILENAME
+    if conf_path.is_file():
+        try:
+            with open(conf_path, "r") as f:
+                data = json.load(f)
+            host = data.get("UpstreamNodeHost")
+            if host is not None:
+                port = int(data.get("UpstreamNodePort", 1883))
+                return (host, port)
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+
+    return ("localhost", 1883)
 
 
 #  === CLASSES ===
@@ -42,7 +71,6 @@ CONNECT_RETRY_INTERVAL: int = 5
 class ClientComponent(Component):
     def __init__(self,
         id: str,
-        broker_socket: Tuple[str, int],
         component_type: ComponentType,
         title: str,
         description: str,
@@ -54,7 +82,6 @@ class ClientComponent(Component):
         Initialize a Lynx Client Component.
         Args:
             id: The unique identifier for this component.
-            broker_socket: The tuple of (host, port) for the MQTT broker.
             component_type: The type of component this is.
             title: The human-readable title of this component.
             description: The human-readable description of this component.
@@ -70,7 +97,7 @@ class ClientComponent(Component):
             description=description, 
             lynx_version=lynx_version)
         
-        self.broker_socket: Tuple[str, int] = broker_socket
+        self.broker_socket: Tuple[str, int] = _resolve_broker_socket()
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
         
         if logger is None:
@@ -153,7 +180,7 @@ class ClientComponent(Component):
                 self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=CONNECT_RETRY_INTERVAL)
                 break
             except ConnectionRefusedError as e:
-                self.logger.error(f"Failed to connect to MQTT broker, is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
+                self.logger.error(f"Failed to connect to MQTT broker ({self.broker_socket[0]}:{self.broker_socket[1]}), is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
                 time.sleep(CONNECT_RETRY_INTERVAL)
                 continue
         

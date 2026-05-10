@@ -1,0 +1,47 @@
+# {{ service.docs.title or service.docs.id }}
+
+{{ service.docs.description }}
+
+| Property | Value |
+|----------|-------|
+| ID | `{{ service.docs.id }}` |
+| Lynx Version | {{ service.docs.lynx_version }} |
+| Time Source | {{ service.docs.time_source }} |
+
+---
+
+## Service Endpoints
+{% for topic, ep in service.endpoints.items() %}
+
+<details markdown="1">
+<summary><code>{{ topic }}</code> — {{ ep.endpoint_direction }}</summary>
+
+{% if ep.get("description", "") %}> {{ ep.get("description", "") }}
+
+{% endif %}
+{{ ep.payload_schema | render_schema }}
+
+</details>
+{% endfor %}
+
+---
+
+## Channels
+{% for channel_id, channel in service.channels.items() %}
+
+### {{ channel.docs.title or channel.docs.id }}
+
+{{ channel.docs.description }}
+{% for topic, ep in channel.endpoints.items() %}
+
+<details markdown="1">
+<summary><code>{{ topic }}</code> — {{ ep.endpoint_direction }}</summary>
+
+{% if ep.get("description", "") %}> {{ ep.get("description", "") }}
+
+{% endif %}
+{{ ep.payload_schema | render_schema }}
+
+</details>
+{% endfor %}
+{% endfor %}

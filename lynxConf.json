@@ -1,0 +1,6 @@
+{
+    "ServiceFile": "examples/device_watcher.py",
+    "ServiceObject": "service",
+    "UpstreamNodeHost": "localhost",
+    "UpstreamNodePort": 1883
+}

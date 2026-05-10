@@ -48,7 +48,6 @@ from lynx_sdk.utils.structures import LYNX_VERSION
 class Service(ClientComponent):
     def __init__(self,
         id: str,
-        broker_socket: Tuple[str, int],
         title: str = "",
         description: str = "",
         lynx_version: str = LYNX_VERSION,
@@ -73,7 +72,6 @@ class Service(ClientComponent):
         # Initialize Component base class
         super().__init__(
             id=id,
-            broker_socket=broker_socket,
             component_type=ComponentType.SERVICE,
             title=title,
             description=description,
