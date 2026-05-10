@@ -18,3 +18,4 @@ build/
 .env
 .VSCodeCounter/
 .noncui
+.cursor/
