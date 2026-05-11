@@ -162,7 +162,7 @@ class ClientComponent(Component):
         self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
 
 
-    def start(self, inifinite_loop: bool = True):
+    def start(self, infinite_loop: bool = True):
         """
         Start the MQTT Client.
         """
@@ -189,7 +189,7 @@ class ClientComponent(Component):
         
         # Keep service running
         self.logger.debug(f"{self.id} started successfully, entering main loop")
-        while inifinite_loop:
+        while infinite_loop:
             time.sleep(1)
 
 
