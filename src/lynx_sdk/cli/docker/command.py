@@ -193,10 +193,15 @@ def docker_build_cmd(
         tag = conf.service_file.replace(".py", "").replace("/", "-").replace("\\", "-")
 
     rprint(f"Building image [bold]{tag}[/bold]...")
-    result = subprocess.run(
-        ["docker", "build", "-t", tag, "."],
-        cwd=str(Path.cwd()),
-    )
+    try:
+        result = subprocess.run(
+            ["docker", "build", "-t", tag, "."],
+            cwd=str(Path.cwd()),
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        rprint("[red]Docker CLI not found.[/red] Install Docker Desktop: https://docs.docker.com/get-docker/")
+        raise typer.Exit(code=1)
 
     # Cleanup temporary build artifacts
     if docker_reqs.exists():
@@ -206,6 +211,16 @@ def docker_build_cmd(
         (Path.cwd() / "pyproject.toml").unlink(missing_ok=True)
 
     if result.returncode != 0:
+        combined = result.stdout + result.stderr
+        if "//./pipe/docker" in combined or "Is the docker daemon running" in combined:
+            rprint(
+                "[red]Docker engine is not running.[/red]\n"
+                "Start [bold]Docker Desktop[/bold] and wait for it to finish "
+                "initialising, then try again."
+            )
+            raise typer.Exit(code=1)
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
         rprint("[red]Docker build failed. See output above.[/red]")
         raise typer.Exit(code=1)
 
