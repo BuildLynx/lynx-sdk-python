@@ -25,5 +25,8 @@ testing = [
     "pytest-sugar",
 ]
 
+[tool.setuptools.package-data]
+lynx_sdk = ["cli/docker/templates/*.j2"]
+
 [project.scripts]
 lynx = "lynx_sdk.cli.main:app"
