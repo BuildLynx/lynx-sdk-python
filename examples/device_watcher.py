@@ -16,7 +16,7 @@ service = Service(
     "cpuLoad",
     title="CPU Load",
     description="Polls the CPU load",
-    output_data_schema={"load": {"type": "number", "unit": "%"}})
+    output_data_schema={"load": {"type": "number", "unit": "%", "minimum": 0, "maximum": 100}})
 def sample_cpu_load(request: InboundMessage, continue_sampling: Callable):
     while continue_sampling(default_interval=0.5):
         yield {"load": psutil.cpu_percent(interval=0.1)}
@@ -47,25 +47,30 @@ MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
         "title": "Total RAM",
         "type": "integer",
         "description": "Total amount of RAM in bytes",
-        "unit": "bytes"
+        "unit": "bytes",
+        "minimum": 0
     },
     "used": {
         "title": "Used RAM",
         "type": "integer",
         "description": "Used amount of RAM in bytes",
-        "unit": "bytes"
+        "unit": "bytes",
+        "minimum": 0
     },
     "free": {
         "title": "Free RAM",
         "type": "integer",
         "description": "Free amount of RAM in bytes",
-        "unit": "bytes"
+        "unit": "bytes",
+        "minimum": 0
     },
     "percent": {
         "title": "RAM Percentage",
         "type": "number",
         "description": "Percentage of RAM used",
-        "unit": "%"
+        "unit": "%",
+        "minimum": 0,
+        "maximum": 100
     }
 }
 
