@@ -148,7 +148,7 @@ class ClientComponent(Component):
             subscribe_topic_filter = f"{self.id}/#"
             if any(not topic.startswith(f"{self.id}/") for topic in self.client_endpoint_topics_set):
                 subscribe_topic_filter = "#"
-            self.mqtt_client.subscribe(subscribe_topic_filter)
+            self.mqtt_client.subscribe(subscribe_topic_filter, qos=2)
             
             self.publish_about()
         except Exception as e:
