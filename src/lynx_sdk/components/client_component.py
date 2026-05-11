@@ -29,6 +29,7 @@ import paho.mqtt.client as mqtt
 # === CONSTANTS ===
 
 CONNECT_RETRY_INTERVAL: int = 5
+KEEPALIVE_INTERVAL: int = 60
 _CONF_FILENAME = "lynxConf.json"
 
 
@@ -173,11 +174,11 @@ class ClientComponent(Component):
         # Set will message and disconnect callback
         self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
-        
+
         # Attempt to connect to broker
         while True:
             try:
-                self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=CONNECT_RETRY_INTERVAL)
+                self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=KEEPALIVE_INTERVAL)
                 break
             except ConnectionRefusedError as e:
                 self.logger.error(f"Failed to connect to MQTT broker ({self.broker_socket[0]}:{self.broker_socket[1]}), is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
