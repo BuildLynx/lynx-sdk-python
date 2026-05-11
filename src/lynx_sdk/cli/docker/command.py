@@ -20,6 +20,7 @@ from lynx_sdk.cli.conf import read_conf
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 _GIT_LINE_RE = re.compile(r"^\s*(-e\s+)?([\w._-]+\s*@\s*)?git\+", re.IGNORECASE)
+_LOCAL_LINE_RE = re.compile(r"^\s*[\w._-]+\s*@\s*file:///", re.IGNORECASE)
 
 docker_app = typer.Typer(
     help="Docker commands for packaging a Lynx Service.",
@@ -44,17 +45,21 @@ def _pip_freeze_path(venv_path: Path) -> Path:
     return venv_path / "bin" / "pip"
 
 
-def _filter_git_lines(text: str) -> str:
-    """Remove all git+ VCS lines from requirements text."""
+def _is_non_portable_line(line: str) -> bool:
+    """Return True if the line is a git+ VCS ref or a local file:/// path."""
+    return bool(_GIT_LINE_RE.match(line) or _LOCAL_LINE_RE.match(line))
+
+
+def _filter_non_portable(text: str) -> str:
+    """Remove git+ and local file:/// lines from requirements text."""
     return "\n".join(
         line for line in text.splitlines()
-        if not _GIT_LINE_RE.match(line)
+        if not _is_non_portable_line(line)
     ) + "\n"
 
 
-def _has_git_lines(text: str) -> bool:
-    """Return True if the requirements text contains any git+ lines."""
-    return any(_GIT_LINE_RE.match(line) for line in text.splitlines())
+def _has_non_portable_lines(text: str) -> bool:
+    return any(_is_non_portable_line(line) for line in text.splitlines())
 
 
 def _find_sdk_source() -> Path | None:
@@ -130,7 +135,7 @@ def docker_init_cmd():
 
     reqs_path = _ensure_requirements()
     reqs_text = reqs_path.read_text(encoding="utf-8")
-    has_git = _has_git_lines(reqs_text)
+    needs_filter = _has_non_portable_lines(reqs_text)
     sdk_source = _find_sdk_source()
 
     env = Environment(
@@ -140,7 +145,7 @@ def docker_init_cmd():
     template = env.get_template("Dockerfile.j2")
     rendered = template.render(
         service_file=conf.service_file,
-        has_git_deps=has_git,
+        has_git_deps=needs_filter,
         sdk_local=sdk_source is not None,
     )
 
@@ -160,13 +165,12 @@ def docker_build_cmd(
 
     reqs_path = _ensure_requirements()
     reqs_text = reqs_path.read_text(encoding="utf-8")
-    has_git = _has_git_lines(reqs_text)
+    needs_filter = _has_non_portable_lines(reqs_text)
     sdk_source = _find_sdk_source()
 
-    # Write a filtered requirements file for Docker (no git+ lines)
     docker_reqs = Path.cwd() / "requirements.docker.txt"
-    if has_git:
-        docker_reqs.write_text(_filter_git_lines(reqs_text), encoding="utf-8")
+    if needs_filter:
+        docker_reqs.write_text(_filter_non_portable(reqs_text), encoding="utf-8")
 
     # Copy SDK source into build context if not already in cwd
     copied_sdk = False
@@ -184,7 +188,7 @@ def docker_build_cmd(
     template = env.get_template("Dockerfile.j2")
     rendered = template.render(
         service_file=conf.service_file,
-        has_git_deps=has_git,
+        has_git_deps=needs_filter,
         sdk_local=sdk_source is not None,
     )
     dockerfile_path.write_text(rendered, encoding="utf-8")
