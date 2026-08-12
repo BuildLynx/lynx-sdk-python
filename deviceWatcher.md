@@ -1,3 +1,4 @@
+# Generative AI was used in the Creation/Modification of this file
 # Device Watcher
 
 Watches the device running this service and publishes statistics.
@@ -29,11 +30,7 @@ Watches the device running this service and publishes statistics.
       `enum: A2.0`
 - `config` **object** — Config covers the mutable configuration of the Component.
 - `status` **object** — Status covers the mutable status of the Component.
-    - `state` **string** — The state of the Component.  
-      `enum: idle,busy,disconnected,disabled`
-    - `action` **object** — The currently executing command or query on the Channel.
-        - `command` **string** — The command of the action.
-        - `payload` **object** — The payload of the action.
+    - `connected` **boolean** — Whether the Service is connected to the Lynx network.
 - `endpoints` **object** — Object representing all the endpoints of the Component.
 - `channels` **object** — Object representing all the channels of the Component.
 

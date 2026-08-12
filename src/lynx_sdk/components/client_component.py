@@ -1,3 +1,4 @@
+# Generative AI was used in the Creation/Modification of this file
 """
 Client Component base class for Lynx. A Client Component is a component that has its own MQTT client (like Service or Node).
 """
@@ -97,6 +98,8 @@ class ClientComponent(Component):
             title=title, 
             description=description, 
             lynx_version=lynx_version)
+
+        self._status = {"connected": False}
         
         self.broker_socket: Tuple[str, int] = _resolve_broker_socket()
         self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
@@ -149,7 +152,8 @@ class ClientComponent(Component):
             if any(not topic.startswith(f"{self.id}/") for topic in self.client_endpoint_topics_set):
                 subscribe_topic_filter = "#"
             self.mqtt_client.subscribe(subscribe_topic_filter, qos=2)
-            
+
+            self._status["connected"] = True
             self.publish_about()
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
@@ -160,6 +164,7 @@ class ClientComponent(Component):
         """
         Callback for when the client disconnects from the MQTT broker.
         """
+        self._status["connected"] = False
         self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
 
 
@@ -172,7 +177,7 @@ class ClientComponent(Component):
         self.mqtt_client.set_on_connect(self.on_connect)
 
         # Set will message and disconnect callback
-        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"state":"disconnected"}}', qos=1, retain=True)
+        self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"connected":false}}', qos=1, retain=True)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
 
         # Attempt to connect to broker

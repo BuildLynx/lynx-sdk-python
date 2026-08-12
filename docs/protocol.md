@@ -80,7 +80,7 @@ The base entity in Lynx. Every Component has:
 
 - **Identity**: `id`, `title`, `description`, `lynx_version`
 - **Endpoints**: a set of MQTT topics it publishes to or subscribes on
-- **Status**: an object describing the current running state
+- **Status**: an object describing mutable runtime status (`connected` for Services/Nodes; `command` for Channels)
 - **About**: a method to produce a full self-description as a JSON object
 
 ### 4.2 Component Types
@@ -283,9 +283,7 @@ The `@/About` payload for a Service looks like this:
       "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.0" },
       "config": {},
       "status": {
-        "command": {
-          "payload": {}
-        } 
+        "command": null
       },
       "endpoints": { }
     }
@@ -385,7 +383,7 @@ sequenceDiagram
     rect rgb(230, 245, 255)
         Note over C,Out: Stream (continuous)
         C->>Ch: !/Stream {interval: 0.5, numSamples: 0, paginate: 1}
-        Ch->>Ch: Set state = busy
+        Ch->>Ch: Set status.command = {command: Stream, payload: ...}
         loop While continue_sampling() and not stopped
             Ch->>Ch: yield sample
             Ch->>Out: [{s, ns, data}]
@@ -397,7 +395,7 @@ sequenceDiagram
         C->>Ch: !/Stop {}
         Ch->>Ch: Set exit flag
         Ch->>Ch: Flush remaining samples
-        Ch->>Ch: Set state = idle
+        Ch->>Ch: Set status.command = null
     end
 ```
 
@@ -774,7 +772,7 @@ Published to `{componentId}/@/Notice` (QoS 1, not retained):
 {
   "action": "Stream",
   "severity": "WARNING",
-  "message": "Channel 'cpuLoad' is not idle, ignoring stream start request.",
+  "message": "Channel 'cpuLoad' already has an active command, ignoring stream start request.",
   "data": {}
 }
 ```
@@ -833,7 +831,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
     "status": {
         "connected": {
             "title": "Connected",
-            "description": "Whether the Node is connected to the Lynx network.",
+            "description": "Whether the Service is connected to the Lynx network.",
             "type": "boolean"
         }
     },
@@ -874,7 +872,17 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
           "type": "object",
           "properties": {
             "command": {
-              "type": "object"
+              "description": "Active command object, or null when idle.",
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "command": { "type": "string" },
+                    "payload": { "type": "object" }
+                  }
+                }
+              ]
             }
           }
         },

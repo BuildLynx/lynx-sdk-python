@@ -67,33 +67,8 @@ SYS_ABOUT_ENDPOINT_ARGS = {
         },
         "status": {
             "title": "Status",
-            "description": "Status covers the mutable status of the Component.",
-            "type": "object",
-            "properties": {
-                "state": {
-                    "title": "State",
-                    "description": "The state of the Component.",
-                    "type": "string",
-                    "enum": ["idle", "busy", "disconnected", "disabled"]
-                },
-                "action": {
-                    "title": "Action",
-                    "description": "The currently executing command or query on the Channel.",
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "title": "Command",
-                            "description": "The command of the action.",
-                            "type": "string"
-                        },
-                        "payload": {
-                            "title": "Payload",
-                            "description": "The payload of the action.",
-                            "type": "object"
-                        }
-                    }
-                }
-            }
+            "description": "Status covers the mutable status of the Component. Shape varies by component type.",
+            "type": "object"
         },
         "endpoints": {
             "title": "Endpoints",
@@ -153,10 +128,12 @@ NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
             "type": "object"
         },
         "status": {
-            "connected": {
-                "title": "Connected",
-                "description": "Whether the Node is connected to the Lynx network.",
-                "type": "boolean"
+            "properties": {
+                "connected": {
+                    "title": "Connected",
+                    "description": "Whether the Node is connected to the Lynx network.",
+                    "type": "boolean"
+                }
             }
         }
     }
@@ -176,13 +153,49 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
         "channels": {
             "title": "Channels",
             "description": "Object representing all the channels of the Component.",
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "title": "Status",
+                        "description": "Status covers the mutable status of the Channel.",
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "title": "Command",
+                                "description": "Active command, or null when idle.",
+                                "oneOf": [
+                                    {"type": "null"},
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "command": {
+                                                "title": "Command Name",
+                                                "description": "The name of the active command.",
+                                                "type": "string"
+                                            },
+                                            "payload": {
+                                                "title": "Payload",
+                                                "description": "The payload of the active command.",
+                                                "type": "object"
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
         },
         "status": {
-            "connected": {
-                "title": "Connected",
-                "description": "Whether the Node is connected to the Lynx network.",
-                "type": "boolean"
+            "properties": {
+                "connected": {
+                    "title": "Connected",
+                    "description": "Whether the Service is connected to the Lynx network.",
+                    "type": "boolean"
+                }
             }
         }
     }

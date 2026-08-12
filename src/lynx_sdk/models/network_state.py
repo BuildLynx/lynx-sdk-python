@@ -1,3 +1,4 @@
+# Generative AI was used in the Creation/Modification of this file
 """
 A class to represent the current state of the network as known by a ClientComponent.
 """
@@ -7,7 +8,7 @@ A class to represent the current state of the network as known by a ClientCompon
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, FrozenSet
 
 # -Lynx Imports-
 from lynx_sdk.utils.mqtt_client import InboundMessage
@@ -20,6 +21,8 @@ from lynx_sdk.components.component import ComponentType
 
 # === CONSTANTS ===
 
+# Top-level keys allowed on a partial About (mutable fields only).
+PARTIAL_ABOUT_KEYS: FrozenSet[str] = frozenset({"status", "config"})
 
 
 # === GLOBALS VARIABLES ===
@@ -96,24 +99,14 @@ class NetworkState():
         component_path_tuple_list :List[Tuple[str, ComponentType]] = \
             [(component_id, ComponentType.NODE) for component_id in component_path_list[:-1]]
 
-        # Add the last ID and component type to the tuple list
-        if not any(key in msg.payload for key in ["lynxType", "channels", "services", "childNodes"]):
-            # Partial About (e.g. MQTT LWT on disconnect: {"status":{"state":"disconnected"}})
-            if "status" in msg.payload and len(component_path_list) >= 1:
+        # Partial About: payload contains only mutable fields (e.g. LWT {"status":{"connected":false}}).
+        # Merge onto the service entry only; leave channel status.command untouched.
+        if msg.payload.keys() <= PARTIAL_ABOUT_KEYS:
+            if msg.payload and len(component_path_list) >= 1:
                 service_id = component_path_list[-1]
                 service_entry = self.state.get("services", {}).get(service_id)
                 if service_entry is not None:
                     deep_merge(service_entry, msg.payload, make_copy=False)
-                    new_state = (msg.payload.get("status") or {}).get("state")
-                    if new_state == "disconnected":
-                        for ch_data in service_entry.get("channels", {}).values():
-                            if not isinstance(ch_data, dict):
-                                continue
-                            ch_status = ch_data.get("status")
-                            if ch_status is None:
-                                ch_data["status"] = {"state": "disconnected"}
-                            elif isinstance(ch_status, dict):
-                                ch_status["state"] = "disconnected"
             return
         lynx_type = msg.payload.get("lynxType", None)
         if "channels" in msg.payload or "services" in msg.payload:

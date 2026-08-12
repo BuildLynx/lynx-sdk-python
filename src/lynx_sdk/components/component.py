@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Type, Callable, Any, TYPE_CHECKING
 from enum import Enum
+from copy import copy
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
@@ -53,7 +54,7 @@ class Component(ABC):
     - Has identity (id, title, description, version)
     - Has endpoints for communication  
     - Can produce an "about" description of itself
-    - Can track status (state, action)
+    - Can track status (shape varies by component type)
     
     Note: MQTT client, time_source, and logger are owned by Service only.
     Channels access these resources through their parent Service reference.
@@ -86,6 +87,7 @@ class Component(ABC):
         self.lynx_version: str = lynx_version
 
         self.endpoints: Dict[str, Endpoint] = {}
+        # Subclasses initialize the concrete status shape (e.g. connected vs command).
         self._status: Dict[str, Any] = {}
     
     
@@ -124,38 +126,35 @@ class Component(ABC):
 
     def get_status_dict(self) -> Dict[str, Any]:
         """
-        Get the status of the component as a dictionary.
+        Get the status of the component as a dictionary suitable for About payloads.
         """
-        return {
-            "state": self._status["state"].value,
-            "action": self._status["action"]
-        }
+        return copy(self._status)
     
-    # TODO: Replace set_status with a method to set the status based off a command received by an InEndpoint
-    # def set_status(self, 
-    #     action: Optional[Dict[str, Any]] = None,
-    #     about_endpoint: Optional[OutEndpoint] = None) -> Dict[str, Any]:
-    #     """
-    #     Set the status of the component. 
-    #     Args:
-    #         state: The state of the component.
-    #         action: The action of the component.
-    #         about_endpoint: If provided, the status will be published to this endpoint. 
-    #             To not publish the status change, do not provide this argument.
-    #     Returns:
-    #         The status of the component.
-    #     """
-    #     changed_status = False
-    #     if action is not None and action != self._status["action"]:
-    #         self._status["action"] = action
-    #         changed_status = True
-    #     if changed_status and about_endpoint is not None:
-    #         if self.component_type == ComponentType.CHANNEL:
-    #             payload = {"channels": {self.id: {"status": self._status}}}
-    #         else:
-    #             payload = {"status": self._status}
-    #         about_endpoint.publish(payload=payload)
-    #     return self._status
+
+    def set_status(self, about_endpoint: Optional[OutEndpoint] = None, **status_updates: Any) -> Dict[str, Any]:
+        """
+        Update status fields and optionally publish a partial About.
+        
+        Args:
+            about_endpoint: If provided, publish the updated status to this endpoint.
+            **status_updates: Status keys to set (e.g. connected=True, command=None).
+        
+        Returns:
+            The status of the component.
+        """
+        changed_status = False
+        for key, value in status_updates.items():
+            if key not in self._status or self._status[key] != value:
+                self._status[key] = value
+                changed_status = True
+        if changed_status and about_endpoint is not None:
+            status_payload = self.get_status_dict()
+            if self.component_type == ComponentType.CHANNEL:
+                payload = {"channels": {self.id: {"status": status_payload}}}
+            else:
+                payload = {"status": status_payload}
+            about_endpoint.publish(payload=payload)
+        return self._status
     
     
     def _create_endpoint(self, 
@@ -220,10 +219,3 @@ class Component(ABC):
         Create a new sub endpoint for this component from a dictionary of arguments.
         """
         return self._create_endpoint(OutEndpoint, **endpoint_args)
-
-    
-
-
-# === MAIN LOOP ===
-
-

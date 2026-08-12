@@ -14,7 +14,7 @@ import threading
 import time
 
 # -Lynx Imports-
-from lynx_sdk.components.component import Component, ComponentType, ComponentState
+from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.components.client_component import ClientComponent
 from lynx_sdk.models.endpoint import OutEndpoint
 from lynx_sdk.models.endpoint_args import \
@@ -149,6 +149,8 @@ class Channel(Component):
             description=description,
             lynx_version=lynx_version
         )
+
+        self._status = {"command": None}
         
         # -Channel-specific initialization-
         self.service: Service = service
@@ -201,8 +203,8 @@ class Channel(Component):
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
         """
-        if self._status.get("state") != ComponentState.IDLE:
-            self.service.logger.warning(f"Channel '{self.id}' is not idle, ignoring stream start request.")
+        if self._status.get("command") is not None:
+            self.service.logger.warning(f"Channel '{self.id}' already has an active command, ignoring stream start request.")
             return
         
         payload = msg.payload
@@ -224,7 +226,7 @@ class Channel(Component):
         """
         Handle a stream request.
         """
-        self.set_status(state=ComponentState.BUSY, action={"command": "Stream", "payload": request.payload})
+        self.set_status(command={"command": "Stream", "payload": request.payload})
         samples_processed = 0
 
         def continue_sampling(default_interval: float = 1.0):
@@ -248,7 +250,7 @@ class Channel(Component):
     
         payload_builder.publish()
         self._exit_flag.set()
-        self.set_status(state=ComponentState.IDLE, action={"command": "", "payload": {}})
+        self.set_status(command=None)
 
 
     def stop_handler(self, msg: InboundMessage):
@@ -279,9 +281,11 @@ class Channel(Component):
     
 
     def set_status(self, 
-        state: Optional[ComponentState] = None, 
-        action: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        command: Optional[Dict[str, Any]] = None,
+        about_endpoint: Optional[OutEndpoint] = None) -> Dict[str, Any]:
         """
-        Set the status of the channel.
+        Set the status of the channel. Pass command=None when idle; an object when busy.
         """
-        return super().set_status(state=state, action=action, about_endpoint=self.service.sys_about_endpoint)
+        if about_endpoint is None:
+            about_endpoint = self.service.sys_about_endpoint
+        return super().set_status(about_endpoint=about_endpoint, command=command)
