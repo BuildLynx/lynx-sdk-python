@@ -16,7 +16,7 @@ from typing import Dict, Optional, Type, Callable, Any, TYPE_CHECKING
 from enum import Enum
 
 # -Lynx Imports-
-from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
+from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
 
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
@@ -148,7 +148,7 @@ class Component(ABC):
     def set_status(self, 
         state: Optional[ComponentState] = None, 
         action: Optional[Dict[str, Any]] = None,
-        about_endpoint: Optional[PubEndpoint] = None) -> Dict[str, Any]:
+        about_endpoint: Optional[OutEndpoint] = None) -> Dict[str, Any]:
         """
         Set the status of the component. 
         Args:
@@ -185,13 +185,13 @@ class Component(ABC):
         This is a convenience method that:
         - Automatically passes component=self
         - Constructs the full topic path from the component's ID
-        - Adds the handler for SubEndpoints
+        - Adds the handler for InEndpoints
         - Registers the endpoint in self.endpoints
         
         Args:
-            endpoint_class: The endpoint class to instantiate (SubEndpoint or PubEndpoint)
+            endpoint_class: The endpoint class to instantiate (InEndpoint or OutEndpoint)
             endpoint_args: Dictionary of arguments for the endpoint (topic, payload_schema, description, etc.)
-            sub_handler: Handler function for SubEndpoints
+            sub_handler: Handler function for InEndpoints
             
         Returns:
             The created endpoint instance
@@ -214,7 +214,7 @@ class Component(ABC):
         else:
             raise ValueError(f"Invalid component type: {self.component_type}")
         
-        if issubclass(endpoint_class, SubEndpoint):
+        if issubclass(endpoint_class, InEndpoint):
             endpoint_args["handler"] = sub_handler
         
         endpoint = endpoint_class(**endpoint_args)
@@ -222,21 +222,21 @@ class Component(ABC):
         return endpoint
     
 
-    def new_sub_endpoint(self,
+    def new_in_endpoint(self,
         sub_handler: Callable,
-        **endpoint_args: Dict) -> SubEndpoint:
+        **endpoint_args: Dict) -> InEndpoint:
         """
         Create a new sub endpoint for this component from a dictionary of arguments.
         """
-        return self._create_endpoint(SubEndpoint, sub_handler, **endpoint_args)
+        return self._create_endpoint(InEndpoint, sub_handler, **endpoint_args)
     
 
-    def new_pub_endpoint(self,
-        **endpoint_args: Dict) -> SubEndpoint:
+    def new_out_endpoint(self,
+        **endpoint_args: Dict) -> InEndpoint:
         """
         Create a new sub endpoint for this component from a dictionary of arguments.
         """
-        return self._create_endpoint(PubEndpoint, **endpoint_args)
+        return self._create_endpoint(OutEndpoint, **endpoint_args)
 
     
 

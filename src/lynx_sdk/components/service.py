@@ -16,7 +16,7 @@ from lynx_sdk.components.client_component import ClientComponent
 from lynx_sdk.components.component import ComponentType
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.models.time_source import TimeSource
-from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
+from lynx_sdk.models.endpoint import InEndpoint, OutEndpoint
 from lynx_sdk.models.endpoint_args import \
     GET_ABOUT_ENDPOINT_ARGS, \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
@@ -85,15 +85,15 @@ class Service(ClientComponent):
         self.channels: Dict[str, Channel] = {}
         
         # -Endpoints-
-        self.sys_about_endpoint: PubEndpoint = self.new_pub_endpoint(**SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: SubEndpoint = self.new_sub_endpoint(self.about_handler, **GET_ABOUT_ENDPOINT_ARGS)
-        self.sys_notice_endpoint: PubEndpoint = self.new_pub_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
+        self.sys_about_endpoint: OutEndpoint = self.new_out_endpoint(**SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
+        self.get_about_endpoint: InEndpoint = self.new_in_endpoint(self.about_handler, **GET_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint: OutEndpoint = self.new_out_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
         # -Setup logging with notices-
         if publish_logs_as_notices:
             self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
 
         if track_network_state:
-            self.new_sub_endpoint(self.network_state.update_from_about_message, **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
+            self.new_in_endpoint(self.network_state.update_from_about_message, **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
 
         # all_endpoint_topics_set is not appended in Component._create_endpoint because we don't want Channels to have repeat endpoints
         self.client_endpoint_topics_set.update(set[str](self.endpoints.keys()))

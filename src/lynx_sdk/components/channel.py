@@ -16,7 +16,7 @@ import time
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType, ComponentState
 from lynx_sdk.components.client_component import ClientComponent
-from lynx_sdk.models.endpoint import PubEndpoint
+from lynx_sdk.models.endpoint import OutEndpoint
 from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
     CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \
@@ -51,7 +51,7 @@ class PayloadBuilder:
     """
     Helper class to build a payload for the channel's output data endpoint, mainly used by Stream channels.
     """
-    def __init__(self, contents: Dict[str, Any] | bool, paginate: int, out_data_endpoint: PubEndpoint, service: Service):
+    def __init__(self, contents: Dict[str, Any] | bool, paginate: int, out_data_endpoint: OutEndpoint, service: Service):
         """
         Initialize a PayloadBuilder object.
         Args:
@@ -64,7 +64,7 @@ class PayloadBuilder:
         self.data_list: List[Dict[str, Any]] = []
         self.perf_counter: int = time.perf_counter_ns()
         self.paginate: int = paginate
-        self.out_data_endpoint: PubEndpoint = out_data_endpoint
+        self.out_data_endpoint: OutEndpoint = out_data_endpoint
         self.service: Service = service
         self.last_data: Any = None
     
@@ -155,14 +155,14 @@ class Channel(Component):
         self._sample_function: Callable[[InboundMessage], Any] = sample_function
         self._exit_flag: threading.Event = threading.Event() # Flag to signal polling/streaming thread to exit
 
-        self.cmd_poll_endpoint = self.new_sub_endpoint(self.poll_handler, **CHANNEL_CMD_POLL_ENDPOINT_ARGS)
-        self.cmd_stream_endpoint = self.new_sub_endpoint(self.start_stream_handler, **CHANNEL_CMD_STREAM_ENDPOINT_ARGS)
-        self.cmd_stop_endpoint = self.new_sub_endpoint(self.stop_handler, **CHANNEL_CMD_STOP_ENDPOINT_ARGS)
+        self.cmd_poll_endpoint = self.new_in_endpoint(self.poll_handler, **CHANNEL_CMD_POLL_ENDPOINT_ARGS)
+        self.cmd_stream_endpoint = self.new_in_endpoint(self.start_stream_handler, **CHANNEL_CMD_STREAM_ENDPOINT_ARGS)
+        self.cmd_stop_endpoint = self.new_in_endpoint(self.stop_handler, **CHANNEL_CMD_STOP_ENDPOINT_ARGS)
 
         if output_data_schema is not None:
             channel_out_data_schema = deepcopy(CHANNEL_OUT_DATA_ENDPOINT_ARGS)
             channel_out_data_schema["payload_schema"]["items"]["properties"]["data"]["properties"] = output_data_schema
-            self.out_data_endpoint: PubEndpoint = self.new_pub_endpoint(**channel_out_data_schema)
+            self.out_data_endpoint: OutEndpoint = self.new_out_endpoint(**channel_out_data_schema)
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):

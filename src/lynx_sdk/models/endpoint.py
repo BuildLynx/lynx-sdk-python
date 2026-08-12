@@ -116,7 +116,7 @@ class Endpoint:
         return about_dict
 
 
-class SubEndpoint(Endpoint):
+class InEndpoint(Endpoint):
     def __init__(self,
         topic: str,
         handler: Callable[[InboundMessage], Optional[Any]],
@@ -207,7 +207,7 @@ class SubEndpoint(Endpoint):
             )
 
 
-class PubEndpoint(Endpoint):
+class OutEndpoint(Endpoint):
     def __init__(self,
         topic: str,
         component: Component,
