@@ -151,6 +151,13 @@ NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
             "title": "Child Nodes",
             "description": "Object representing all the child nodes of the Node.",
             "type": "object"
+        },
+        "status": {
+            "connected": {
+                "title": "Connected",
+                "description": "Whether the Node is connected to the Lynx network.",
+                "type": "boolean"
+            }
         }
     }
 })
@@ -170,6 +177,13 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
             "title": "Channels",
             "description": "Object representing all the channels of the Component.",
             "type": "object"
+        },
+        "status": {
+            "connected": {
+                "title": "Connected",
+                "description": "Whether the Node is connected to the Lynx network.",
+                "type": "boolean"
+            }
         }
     }
 })

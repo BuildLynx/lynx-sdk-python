@@ -45,13 +45,6 @@ class ComponentType(Enum):
     CHANNEL = "Channel"
 
 
-class ComponentState(Enum):
-    BUSY = "busy"
-    IDLE = "idle"
-    DISCONNECTED = "disconnected"
-    DISABLED = "disabled"
-
-
 class Component(ABC):
     """
     Base class for Lynx components (Service, Channel, etc).
@@ -93,13 +86,7 @@ class Component(ABC):
         self.lynx_version: str = lynx_version
 
         self.endpoints: Dict[str, Endpoint] = {}
-        self._status: Dict[str, Any] = {
-            "state": ComponentState.IDLE,
-            "action": {
-                "command": "",
-                "payload": {}
-            }
-        }
+        self._status: Dict[str, Any] = {}
     
     
     @abstractmethod
@@ -144,35 +131,31 @@ class Component(ABC):
             "action": self._status["action"]
         }
     
-
-    def set_status(self, 
-        state: Optional[ComponentState] = None, 
-        action: Optional[Dict[str, Any]] = None,
-        about_endpoint: Optional[OutEndpoint] = None) -> Dict[str, Any]:
-        """
-        Set the status of the component. 
-        Args:
-            state: The state of the component.
-            action: The action of the component.
-            about_endpoint: If provided, the status will be published to this endpoint. 
-                To not publish the status change, do not provide this argument.
-        Returns:
-            The status of the component.
-        """
-        changed_status = False
-        if state is not None and state != self._status["state"]:
-            self._status["state"] = state
-            changed_status = True
-        if action is not None and action != self._status["action"]:
-            self._status["action"] = action
-            changed_status = True
-        if changed_status and about_endpoint is not None:
-            if self.component_type == ComponentType.CHANNEL:
-                payload = {"channels": {self.id: {"status": self._status}}}
-            else:
-                payload = {"status": self._status}
-            about_endpoint.publish(payload=payload)
-        return self._status
+    # TODO: Replace set_status with a method to set the status based off a command received by an InEndpoint
+    # def set_status(self, 
+    #     action: Optional[Dict[str, Any]] = None,
+    #     about_endpoint: Optional[OutEndpoint] = None) -> Dict[str, Any]:
+    #     """
+    #     Set the status of the component. 
+    #     Args:
+    #         state: The state of the component.
+    #         action: The action of the component.
+    #         about_endpoint: If provided, the status will be published to this endpoint. 
+    #             To not publish the status change, do not provide this argument.
+    #     Returns:
+    #         The status of the component.
+    #     """
+    #     changed_status = False
+    #     if action is not None and action != self._status["action"]:
+    #         self._status["action"] = action
+    #         changed_status = True
+    #     if changed_status and about_endpoint is not None:
+    #         if self.component_type == ComponentType.CHANNEL:
+    #             payload = {"channels": {self.id: {"status": self._status}}}
+    #         else:
+    #             payload = {"status": self._status}
+    #         about_endpoint.publish(payload=payload)
+    #     return self._status
     
     
     def _create_endpoint(self, 

@@ -8,8 +8,6 @@ A class to represent the current state of the network as known by a ClientCompon
 
 # -stdlib Imports-
 from typing import Dict, Any, List, Tuple
-from collections import defaultdict
-import json
 
 # -Lynx Imports-
 from lynx_sdk.utils.mqtt_client import InboundMessage
