@@ -8,14 +8,14 @@
 
 Lynx is a **Lightweight Network Extension of MQTT**. It defines a set of conventions on top of standard MQTT that give sensor networks self-describing services, structured data channels, automatic discovery, and schema-validated payloads -- all without replacing MQTT or requiring a custom broker.
 
-Any standard MQTT v5 client can participate in a Lynx network. Lynx simply defines *how* topics are named, *what* payloads look like, and *which* topics carry special meaning. The result is a network where every service advertises what it is, what data it produces, and what commands it accepts -- and where observers can discover and monitor the entire topology automatically.
+Any standard MQTT client can participate in a Lynx network. Lynx simply defines *how* topics are named, *what* payloads look like, and *which* topics carry special meaning. The result is a network where every service advertises what it is, what data it produces, and what commands it accepts -- and where observers can discover and monitor the entire topology automatically.
 
 ### Design Philosophy
 
 - **Minimal complexity.** Lynx adds structure to MQTT, not a new transport. If you know MQTT, you already know most of Lynx.
 - **Self-describing.** Every Lynx component publishes an "About" payload that fully describes its identity, capabilities, endpoints, and current status.
 - **Schema-enforced.** Payloads are JSON validated against JSON Schema (Draft 7), so producers and consumers agree on shape at protocol level.
-- **Composable.** Services contain Channels; Nodes contain Services. The hierarchy is simple and extensible.
+- **Composable.** Services contain Channels; Nodes connect Services and other child Nodes. The hierarchy is simple and extensible.
 
 ---
 
@@ -47,7 +47,7 @@ graph TD
 | **Service** | Application boundary. Owns an MQTT client, a time source, and one or more Channels. Publishes a retained self-description. |
 | **Channel** | Single data stream. Accepts Poll/Stream/Stop commands and publishes timestamped sample arrays. |
 
-A Lynx network can run with just a Service connected to a broker -- Nodes are optional. Any vanilla MQTT client can subscribe to Lynx topics and consume the JSON payloads directly.
+A Lynx network can run with just a Service connected to any MQTT broker -- Nodes are optional. Any vanilla MQTT client can subscribe to Lynx topics and consume the JSON payloads directly.
 
 ---
 
@@ -64,10 +64,10 @@ A Lynx network can run with just a Service connected to a broker -- Nodes are op
 
 ### 3.2 Non-Ideal Fits
 
-- **No MQTT broker available.** Lynx is built on MQTT. Without a broker, the protocol has no transport.
+- **No TCP/IP network available.** Lynx is built on MQTT which requires TCP/IP. Additionally an MQTT broker or Lynx Node is required.
 - **Heavy computation inside sampling loops.** Channel sampling runs in a thread with a cooperative `continue_sampling()` check. CPU-bound or long-blocking work inside the generator can starve other channels or delay Stop commands.
 - **Non-JSON / binary payloads.** Lynx payloads are JSON objects. Large binary data (images, video, raw ADC buffers) would need base64 encoding or an out-of-band mechanism.
-- **Very large-scale deployments (100k+ devices).** Every Service publishes a retained `@/About` message. At extreme scale, the broker's retained message store and the wildcard subscription `+/@/About` may become bottlenecks.
+- **Very large-scale deployments (1k+ devices).** Every Service publishes a retained `@/About` message. At extreme scale, the broker's retained message store and the wildcard subscription `+/@/About` may become bottlenecks.
 - **RPC-heavy / request-response architectures.** Lynx is oriented around pub/sub data streams, not request-response patterns. While `?/About` is a query-response pattern, Channels are one-directional output streams.
 
 ---
@@ -80,7 +80,7 @@ The base entity in Lynx. Every Component has:
 
 - **Identity**: `id`, `title`, `description`, `lynx_version`
 - **Endpoints**: a set of MQTT topics it publishes to or subscribes on
-- **Status**: a `state` (idle, busy, disconnected, disabled) and an optional `action` describing work in progress
+- **Status**: an object describing the current running state
 - **About**: a method to produce a full self-description as a JSON object
 
 ### 4.2 Component Types
@@ -133,27 +133,18 @@ classDiagram
 - **Service** and **Node** are *client components* -- they own an MQTT connection. A Channel does not; it accesses the broker through its parent Service.
 - A Service contains zero or more Channels. A Node monitors zero or more Services and child Nodes.
 
-### 4.3 Component States
-
-| State | Meaning |
-|-------|---------|
-| `idle` | Ready to accept commands. |
-| `busy` | Actively executing a command (e.g., streaming). |
-| `disconnected` | Lost connection to the broker (set via LWT). |
-| `disabled` | Intentionally taken offline. |
-
-### 4.4 Endpoints
+### 4.3 Endpoints
 
 An Endpoint is a single MQTT topic with:
 - A **direction**: `sub` (subscribes and handles incoming messages), `pub` (publishes outgoing messages), or `pubsub`.
 - A **payload schema**: JSON Schema (Draft 7) describing the expected payload.
 - A **description**: human-readable purpose.
 
-### 4.5 About
+### 4.4 About
 
 Every component can produce an "About" payload -- a JSON object that fully describes the component. Services and Nodes publish their About as a **retained** MQTT message so that new subscribers immediately receive the current state of the network.
 
-### 4.6 Contents
+### 4.5 Contents
 
 A filtering mechanism that lets consumers request only the parts of a payload they care about. The `contents` parameter appears on `?/About` queries and on channel Poll/Stream commands. It supports several modes:
 
@@ -267,11 +258,7 @@ The `@/About` payload for a Service looks like this:
   },
   "config": {},
   "status": {
-    "state": "idle",
-    "action": {
-      "command": "",
-      "payload": {}
-    }
+    "connected": true
   },
   "endpoints": {
     "deviceWatcher/@/About": {
@@ -295,7 +282,11 @@ The `@/About` payload for a Service looks like this:
       "lynxType": "Channel",
       "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.0" },
       "config": {},
-      "status": { "state": "idle", "action": { "command": "", "payload": {} } },
+      "status": {
+        "command": {
+          "payload": {}
+        } 
+      },
       "endpoints": { }
     }
   }
@@ -309,7 +300,7 @@ Key sections:
 | `lynxType` | Immutable | Always `"Service"` for a Service. |
 | `docs` | Immutable | Identity metadata: `id`, `title`, `description`, `lynx_version`, `time_source`. |
 | `config` | Mutable | Runtime configuration. Application-defined. |
-| `status` | Mutable | Current `state` and in-progress `action`. |
+| `status` | Mutable | Current `connected` state. |
 | `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, description). |
 | `channels` | Mixed | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). |
 
@@ -320,7 +311,7 @@ sequenceDiagram
     participant S as Service
     participant B as MQTT Broker
 
-    S->>B: Set LWT: {serviceId}/@/About = {"status":{"state":"disconnected"}} (retained)
+    S->>B: Set LWT: {serviceId}/@/About = {"status":{"connected":false}} (retained)
     S->>B: CONNECT
     B-->>S: CONNACK
     S->>B: SUBSCRIBE {serviceId}/#
@@ -555,15 +546,14 @@ A Node's About extends the base About with `services` and `child_nodes`:
   },
   "config": {},
   "status": {
-    "state": "idle",
-    "action": { "command": "", "payload": {} }
+    "connected": true
   },
   "endpoints": { },
   "services": {
     "deviceWatcher": {
       "lynxType": "Service",
       "docs": { },
-      "status": { "state": "idle" },
+      "status": { "connected": false },
       "channels": { }
     }
   },
@@ -598,8 +588,8 @@ Each Node maintains a **NetworkState** -- a hierarchical in-memory model of the 
 ```json
 {
   "services": {
-    "serviceA": { "lynxType": "Service", "status": { "state": "idle" }, "channels": {} },
-    "serviceB": { "lynxType": "Service", "status": { "state": "busy" }, "channels": {} }
+    "serviceA": { "lynxType": "Service", "status": { "connected": true }, "channels": {} },
+    "serviceB": { "lynxType": "Service", "status": { "connected": true }, "channels": {} }
   },
   "childNodes": {
     "childNode1": {
@@ -764,13 +754,11 @@ Every incoming About message on `+/@/About` is parsed, and the component is plac
 When a Service or Node connects, it sets an MQTT Last Will:
 
 - **Topic**: `{componentId}/@/About`
-- **Payload**: `{"status":{"state":"disconnected"}}`
+- **Payload**: `{"status":{ "connected": false }}`
 - **QoS**: 1
 - **Retain**: true
 
 If the client disconnects unexpectedly, the broker publishes this LWT message. NetworkState handles it as a **partial About update** -- it merges the `status` into the existing entry without replacing the full About.
-
-When a Service goes `disconnected`, the NetworkState also **cascades** the disconnected state to all of that Service's Channels, since they are unreachable without the Service's MQTT connection.
 
 ---
 
@@ -843,20 +831,11 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
       "description": "Mutable runtime configuration."
     },
     "status": {
-      "type": "object",
-      "properties": {
-        "state": {
-          "type": "string",
-          "enum": ["idle", "busy", "disconnected", "disabled"]
-        },
-        "action": {
-          "type": "object",
-          "properties": {
-            "command": { "type": "string" },
-            "payload": { "type": "object" }
-          }
+        "connected": {
+            "title": "Connected",
+            "description": "Whether the Node is connected to the Lynx network.",
+            "type": "boolean"
         }
-      }
     },
     "endpoints": {
       "type": "object",
@@ -894,13 +873,8 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "status": {
           "type": "object",
           "properties": {
-            "state": { "type": "string", "enum": ["idle", "busy", "disconnected", "disabled"] },
-            "action": {
-              "type": "object",
-              "properties": {
-                "command": { "type": "string" },
-                "payload": { "type": "object" }
-              }
+            "command": {
+              "type": "object"
             }
           }
         },
@@ -933,16 +907,10 @@ Extends the Service About schema with `services` and `child_nodes`:
     },
     "config": { "type": "object" },
     "status": {
-      "type": "object",
-      "properties": {
-        "state": { "type": "string", "enum": ["idle", "busy", "disconnected", "disabled"] },
-        "action": {
-          "type": "object",
-          "properties": {
-            "command": { "type": "string" },
-            "payload": { "type": "object" }
-          }
-        }
+      "connected": {
+        "title": "Connected",
+        "description": "Whether the Node is connected to the Lynx network.",
+        "type": "boolean"
       }
     },
     "endpoints": { "type": "object" },
