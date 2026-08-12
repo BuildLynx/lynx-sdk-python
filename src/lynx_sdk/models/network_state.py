@@ -1,4 +1,3 @@
-# Generative AI was used in the Creation/Modification of this file
 """
 A class to represent the current state of the network as known by a ClientComponent.
 """
