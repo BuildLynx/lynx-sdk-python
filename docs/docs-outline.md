@@ -47,6 +47,7 @@ This outline describes the structure and contents of `protocol.md`.
 - **About** -- retained self-description payload published by every component
 - **Notice** -- log/alert messages published to MQTT
 - **`contents`** -- filtering mechanism to trim payloads on request
+- **Endpoint metadata** -- `endpoint_direction`, `description`, `payload_schema`, optional `replyTopics` (InEndpoints) and `dataOutput` (Channel InEndpoints)
 - **Mermaid diagram**: component hierarchy
 
 ## 5. Topic Structure
@@ -65,7 +66,7 @@ This outline describes the structure and contents of `protocol.md`.
 - What a Service is and what it owns
 - Service endpoints:
   - `{serviceId}/@/About` -- retained self-description (pub, QoS 1)
-  - `{serviceId}/?/About` -- query with optional `contents` filtering (sub)
+  - `{serviceId}/?/About` -- query with optional `contents` filtering (sub); `replyTopics: ["{serviceId}/@/About"]`
   - `{serviceId}/@/Notice` -- log/alert messages (pub, QoS 1)
 - The About payload structure (annotated JSON example)
 - Service lifecycle: init, connect, publish About, enter main loop
@@ -76,10 +77,10 @@ This outline describes the structure and contents of `protocol.md`.
 
 - What a Channel is and how it relates to a Service
 - Channel endpoints:
-  - `{serviceId}/{channelId}/!/Poll` -- one-shot sample
-  - `{serviceId}/{channelId}/!/Stream` -- continuous sampling
-  - `{serviceId}/{channelId}/!/Stop` -- halt active stream
-  - `{serviceId}/{channelId}/<` -- data output
+  - `{serviceId}/{channelId}/!/Poll` -- one-shot sample; `replyTopics: []`, `dataOutput: true`
+  - `{serviceId}/{channelId}/!/Stream` -- continuous sampling; `replyTopics: ["{serviceId}/@/About"]`, `dataOutput: true`
+  - `{serviceId}/{channelId}/!/Stop` -- halt active stream; `replyTopics: ["{serviceId}/@/About"]`, `dataOutput: false`
+  - `{serviceId}/{channelId}/<` -- data output (pub, no `replyTopics`/`dataOutput`)
 - **Mermaid diagram**: Poll/Stream/Stop sequence diagram
 - Output format: JSON array of `[{s, ns, data}, ...]`
 - Stream parameters: `interval`, `numSamples`, `paginate`
@@ -129,8 +130,8 @@ This outline describes the structure and contents of `protocol.md`.
 
 ## Appendix A: Full JSON Schemas
 
-- `@/About` payload (Service variant with `channels`)
-- `@/About` payload (Node variant with `services`, `childNodes`)
+- `@/About` payload (Service variant with `channels`); endpoint metadata includes `replyTopics`; channel endpoint metadata includes `replyTopics` and `dataOutput`
+- `@/About` payload (Node variant with `services`, `childNodes`); endpoint metadata includes `replyTopics`
 - `@/Notice` payload
 - `!/Poll` request
 - `!/Stream` request
@@ -140,4 +141,4 @@ This outline describes the structure and contents of `protocol.md`.
 ## Appendix B: Protocol Version History
 
 - `A1.0` -- Initial version.
-- `A2.0` -- Allowed user event loop-owned publishing. Added `response_topics`, `status.connection`, and `status.operation` fields. Significant changes to Stream command.
+- `A2.0` -- Allowed user event loop-owned publishing. Added `replyTopics` and `dataOutput` on endpoint About metadata, `status.connection`, and `status.operation` fields. Significant changes to Stream command.

@@ -1,3 +1,4 @@
+<!-- Generative AI was used in the Creation/Modification of this file -->
 # The Lynx Protocol
 
 **Version: A2.0**
@@ -155,6 +156,52 @@ A filtering mechanism that lets consumers request only the parts of a payload th
 | `{"key1": true, "key2": false}` | Select specific keys; per-key `true`/`false` controls inclusion or change-of-value. |
 | `"<xxh32 hex string>"` | Return the payload only if its xxh32 hash differs from the provided hash. |
 
+### 4.6 Endpoint Metadata
+
+Each endpoint in a component's About is keyed by its full MQTT topic string and contains the following fields:
+
+| Field | Type | Required | Applies to | Description |
+|-------|------|----------|------------|-------------|
+| `endpoint_direction` | string | yes | all | `"sub"`, `"pub"`, or `"pubsub"`. |
+| `description` | string | no | all | Human-readable purpose of the endpoint. |
+| `payload_schema` | object | no | all | JSON Schema (Draft 7) describing the payload shape. |
+| `replyTopics` | array of strings | no | InEndpoints only | Nominal non-data reply topics (see below). |
+| `dataOutput` | boolean | no | Channel InEndpoints only | Whether this endpoint may publish to the channel's `<` topic (see below). |
+
+#### `replyTopics`
+
+Declares the set of MQTT topics that each receive exactly **one** message in the nominal (non-error) flow of this endpoint. The array is **unordered**. Each entry must be a complete, absolute MQTT topic (e.g. `deviceWatcher/@/About`) -- wildcards (`+`, `#`) are not permitted.
+
+Three-state semantics:
+
+| Value | Meaning |
+|-------|---------|
+| *(omitted)* | The endpoint makes no declaration about replies. |
+| `[]` (empty array) | The endpoint explicitly has no nominal reply. |
+| `["topic1", ...]` | Each listed topic receives one message in the nominal flow. |
+
+`replyTopics` only appears on InEndpoints (endpoints with `endpoint_direction` of `"sub"` or `"pubsub"`). OutEndpoints (direction `"pub"`) do not carry this field. The channel data topic (`<`) is never listed in `replyTopics` -- data output is signaled exclusively via `dataOutput`.
+
+**Design note -- cross-component topics (allowed):** Entries may reference topics outside the declaring component's namespace. This enables aggregators and orchestrators to declare replies on other services' topics. The tradeoff is that consumers cannot assume replies stay within the advertiser's topic tree, and About validation cannot verify topic ownership.
+
+**Design note -- no wildcards (disallowed):** Restricting entries to concrete topics keeps the "one message per listed topic" guarantee well-defined and avoids match-count ambiguity. The tradeoff is that reply sets like "every child's `@/About`" cannot be expressed compactly; each topic must be listed individually.
+
+#### `dataOutput`
+
+Declares whether an InEndpoint may cause data payloads to be published to the channel's data topic (`<`). This field is only valid on **Channel InEndpoints** (endpoints declared under a channel's About).
+
+Three-state semantics:
+
+| Value | Meaning |
+|-------|---------|
+| *(omitted)* | The endpoint makes no declaration about data output. |
+| `true` | This endpoint may publish data payloads to the channel's `<` topic. |
+| `false` | This endpoint explicitly does not publish data to `<`. |
+
+Setting `dataOutput: true` is invalid if the channel does not have a `<` endpoint.
+
+OutEndpoints (`<`, `@/About`, `@/Notice`) never carry `dataOutput`.
+
 ---
 
 ## 5. Topic Structure
@@ -237,7 +284,7 @@ Every Service automatically creates three endpoints:
 Publishes the full self-description on connect and whenever state changes.
 
 **`{serviceId}/?/About`** (sub)
-Receives queries. When a message arrives, the Service produces its About, optionally trims it by the `contents` parameter in the request, and publishes the result to `@/About`.
+Receives queries. When a message arrives, the Service produces its About, optionally trims it by the `contents` parameter in the request, and publishes a single message to `@/About`. This is declared via `replyTopics: ["{serviceId}/@/About"]`.
 
 **`{serviceId}/@/Notice`** (pub, QoS 1, not retained)
 Publishes log-level notices (DEBUG through CRITICAL) as structured JSON.
@@ -269,7 +316,8 @@ The `@/About` payload for a Service looks like this:
     "deviceWatcher/?/About": {
       "endpoint_direction": "sub",
       "description": "Query information about the Component.",
-      "payload_schema": { }
+      "payload_schema": { },
+      "replyTopics": ["deviceWatcher/@/About"]
     },
     "deviceWatcher/@/Notice": {
       "endpoint_direction": "pub",
@@ -285,7 +333,34 @@ The `@/About` payload for a Service looks like this:
       "status": {
         "command": null
       },
-      "endpoints": { }
+      "endpoints": {
+        "deviceWatcher/cpuLoad/!/Poll": {
+          "endpoint_direction": "sub",
+          "description": "Start polling at a set time interval on the channel for data.",
+          "payload_schema": { },
+          "replyTopics": [],
+          "dataOutput": true
+        },
+        "deviceWatcher/cpuLoad/!/Stream": {
+          "endpoint_direction": "sub",
+          "description": "Start streaming on the channel, emitting data when available.",
+          "payload_schema": { },
+          "replyTopics": ["deviceWatcher/@/About"],
+          "dataOutput": true
+        },
+        "deviceWatcher/cpuLoad/!/Stop": {
+          "endpoint_direction": "sub",
+          "description": "Stop polling or streaming on the channel.",
+          "payload_schema": { },
+          "replyTopics": ["deviceWatcher/@/About"],
+          "dataOutput": false
+        },
+        "deviceWatcher/cpuLoad/<": {
+          "endpoint_direction": "pub",
+          "description": "Output data from the channel.",
+          "payload_schema": { }
+        }
+      }
     }
   }
 }
@@ -299,7 +374,7 @@ Key sections:
 | `docs` | Immutable | Identity metadata: `id`, `title`, `description`, `lynx_version`, `time_source`. |
 | `config` | Mutable | Runtime configuration. Application-defined. |
 | `status` | Mutable | Current `connected` state. |
-| `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, description). |
+| `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, description, and optional `replyTopics` / `dataOutput`). |
 | `channels` | Mixed | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). |
 
 ### 6.3 Service Lifecycle
@@ -358,12 +433,12 @@ A Channel is the data path within a Service. It encapsulates a single input/outp
 
 Every Channel creates four endpoints under its parent Service's topic namespace:
 
-| Endpoint | Direction | Purpose |
-|----------|-----------|---------|
-| `{serviceId}/{channelId}/!/Poll` | sub | Request a single sample |
-| `{serviceId}/{channelId}/!/Stream` | sub | Start continuous sampling |
-| `{serviceId}/{channelId}/!/Stop` | sub | Halt an active stream |
-| `{serviceId}/{channelId}/<` | pub | Data output (array of timestamped samples) |
+| Endpoint | Direction | `replyTopics` | `dataOutput` | Purpose |
+|----------|-----------|---------------|--------------|---------|
+| `{serviceId}/{channelId}/!/Poll` | sub | `[]` | `true` | Request a single sample |
+| `{serviceId}/{channelId}/!/Stream` | sub | `["{serviceId}/@/About"]` | `true` | Start continuous sampling |
+| `{serviceId}/{channelId}/!/Stop` | sub | `["{serviceId}/@/About"]` | `false` | Halt an active stream |
+| `{serviceId}/{channelId}/<` | pub | -- | -- | Data output (array of timestamped samples) |
 
 ### 7.2 Poll / Stream / Stop Lifecycle
 
@@ -843,7 +918,13 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "properties": {
           "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
           "description": { "type": "string" },
-          "payload_schema": { "type": "object" }
+          "payload_schema": { "type": "object" },
+          "replyTopics": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true,
+            "description": "Unordered complete MQTT topics that each receive one nominal non-data reply. Omitted = undeclared; empty = no nominal reply. InEndpoints only."
+          }
         }
       }
     },
@@ -886,7 +967,28 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
             }
           }
         },
-        "endpoints": { "type": "object" }
+        "endpoints": {
+          "type": "object",
+          "description": "Map of topic string to channel endpoint metadata.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
+              "description": { "type": "string" },
+              "payload_schema": { "type": "object" },
+              "replyTopics": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true,
+                "description": "Unordered complete MQTT topics that each receive one nominal non-data reply. Omitted = undeclared; empty = no nominal reply. InEndpoints only."
+              },
+              "dataOutput": {
+                "type": "boolean",
+                "description": "If true, this InEndpoint may publish payloads to the channel's < topic. Omitted = undeclared; false = explicitly no data output. Invalid if true and the channel has no < endpoint."
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -921,7 +1023,24 @@ Extends the Service About schema with `services` and `child_nodes`:
         "type": "boolean"
       }
     },
-    "endpoints": { "type": "object" },
+    "endpoints": {
+      "type": "object",
+      "description": "Map of topic string to endpoint metadata.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
+          "description": { "type": "string" },
+          "payload_schema": { "type": "object" },
+          "replyTopics": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true,
+            "description": "Unordered complete MQTT topics that each receive one nominal non-data reply. Omitted = undeclared; empty = no nominal reply. InEndpoints only."
+          }
+        }
+      }
+    },
     "services": {
       "type": "object",
       "description": "Map of service ID to service About object."

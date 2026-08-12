@@ -8,7 +8,7 @@ This module provides an endpoint for Lynx.
 
 # -stdlib Imports-
 from __future__ import annotations
-from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
+from typing import Callable, Optional, Any, Dict, List, TYPE_CHECKING
 from enum import Enum
 
 from lynx_sdk.utils.mqtt_client import MqttClient, InboundMessage
@@ -124,7 +124,8 @@ class InEndpoint(Endpoint):
         payload_schema: object,
         description: str = "",
         payload_schema_additional_properties: bool = False,
-        allow_run_while_busy: bool = True,):
+        reply_topics: Optional[List[str]] = None,
+        data_output: Optional[bool] = None):
         """
         Initialize a Lynx Subscribe Endpoint object.
         
@@ -134,7 +135,11 @@ class InEndpoint(Endpoint):
             component: The Component (Service or Channel) this endpoint belongs to
             payload_schema: JSON schema for validating received payloads
             description: Human-readable description
-            allow_run_while_busy: Whether to allow execution while busy
+            reply_topics: Optional list of absolute MQTT topics that each receive one
+                nominal non-data reply. None = undeclared; [] = explicitly no reply.
+            data_output: Optional bool indicating whether this endpoint may publish to
+                the channel's < topic. None = undeclared; True/False = explicit declaration.
+                Only valid on Channel InEndpoints.
         """
         super().__init__(
             topic=topic, 
@@ -144,7 +149,8 @@ class InEndpoint(Endpoint):
             description=description,
             payload_schema_additional_properties=payload_schema_additional_properties)
         self.handler: Callable[[InboundMessage], Optional[Any]] = handler
-        self.allow_run_while_busy: bool = allow_run_while_busy
+        self.reply_topics: Optional[List[str]] = reply_topics
+        self.data_output: Optional[bool] = data_output
         self.component.get_client_component().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
 
@@ -205,6 +211,22 @@ class InEndpoint(Endpoint):
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
+
+
+    def produce_about(self) -> Dict:
+        """
+        Produce a dictionary of information about the endpoint, including
+        replyTopics and dataOutput when declared.
+        """
+        about_dict = super().produce_about()
+
+        if self.reply_topics is not None:
+            about_dict["replyTopics"] = self.reply_topics
+
+        if self.data_output is not None:
+            about_dict["dataOutput"] = self.data_output
+
+        return about_dict
 
 
 class OutEndpoint(Endpoint):

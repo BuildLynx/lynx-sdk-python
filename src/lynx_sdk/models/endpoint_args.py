@@ -6,10 +6,13 @@ from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.utils.datastructures import deep_merge
 from lynx_sdk.models.notice import NoticeSeverity
 
+REPLY_TOPIC_CLIENT_ABOUT = "__CLIENT_ABOUT__"
+
 # -Component Endpoints-
 GET_ABOUT_ENDPOINT_ARGS = {
     "topic": "?/About",
     "description": "Query information about the Component.",
+    "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
     "payload_schema": {
         "contents": {
             "title": "contents Object",
@@ -205,6 +208,8 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "topic": "!/Poll",
     "description": "Start polling at a set time interval on the channel for data.",
+    "reply_topics": [],
+    "data_output": True,
     "payload_schema": {
         "contents": {
             "title": "Values to contents",
@@ -218,6 +223,8 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
 CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
     "topic": "!/Stream",
     "description": "Start streaming on the channel, emitting data when available.",
+    "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
+    "data_output": True,
     "payload_schema": {
         "contents": {
             "title": "Values to contents",
@@ -252,6 +259,8 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
 CHANNEL_CMD_STOP_ENDPOINT_ARGS = {
     "topic": "!/Stop",
     "description": "Stop polling or streaming on the channel.",
+    "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
+    "data_output": False,
     "payload_schema": {}
 }
 

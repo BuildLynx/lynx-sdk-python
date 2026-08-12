@@ -18,6 +18,7 @@ from copy import copy
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
+from lynx_sdk.models.endpoint_args import REPLY_TOPIC_CLIENT_ABOUT
 
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service
@@ -168,6 +169,7 @@ class Component(ABC):
         - Automatically passes component=self
         - Constructs the full topic path from the component's ID
         - Adds the handler for InEndpoints
+        - Resolves reply_topics sentinels for InEndpoints
         - Registers the endpoint in self.endpoints
         
         Args:
@@ -198,6 +200,14 @@ class Component(ABC):
         
         if issubclass(endpoint_class, InEndpoint):
             endpoint_args["handler"] = sub_handler
+            reply_topics = endpoint_args.get("reply_topics")
+            if reply_topics is not None:
+                client_component = self.get_client_component()
+                endpoint_args["reply_topics"] = [
+                    client_component.sys_about_endpoint.topic
+                    if t == REPLY_TOPIC_CLIENT_ABOUT else t
+                    for t in reply_topics
+                ]
         
         endpoint = endpoint_class(**endpoint_args)
         self.endpoints[endpoint.topic] = endpoint
