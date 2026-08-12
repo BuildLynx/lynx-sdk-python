@@ -147,7 +147,7 @@ NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
             "description": "Object representing all the services of the Node.",
             "type": "object"
         },
-        "child_nodes": {
+        "childNodes": {
             "title": "Child Nodes",
             "description": "Object representing all the child nodes of the Node.",
             "type": "object"

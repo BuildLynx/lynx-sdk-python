@@ -97,7 +97,7 @@ class Node(ClientComponent):
                 endpoint.topic: endpoint.produce_about() for endpoint in self.endpoints.values()
             },
             "services": {},
-            "child_nodes": {}
+            "childNodes": {}
         }
     
 
