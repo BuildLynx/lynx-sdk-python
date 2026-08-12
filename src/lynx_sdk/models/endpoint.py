@@ -8,7 +8,6 @@ This module provides an endpoint for Lynx.
 
 # -stdlib Imports-
 from __future__ import annotations
-from logging import Logger, getLogger
 from typing import Callable, Optional, Any, Dict, TYPE_CHECKING
 from enum import Enum
 
@@ -16,7 +15,7 @@ from lynx_sdk.utils.mqtt_client import MqttClient, InboundMessage
 
 # -Lynx Imports-
 if TYPE_CHECKING:
-    from lynx_sdk.components.component import Component, ComponentState
+    from lynx_sdk.components.component import Component
 from lynx_sdk.utils.json_tools import validate_json_object
 
 # -External Imports-

@@ -13,13 +13,10 @@ Note: Service owns the MQTT client, time_source, and logger. Channels access the
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Type, Callable, Any, TYPE_CHECKING
-from logging import Logger
 from enum import Enum
-from copy import deepcopy
 
 # -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint, SubEndpoint, PubEndpoint
-from lynx_sdk.utils.datastructures import deep_merge
 
 if TYPE_CHECKING:
     from lynx_sdk.components.service import Service

@@ -9,13 +9,11 @@ Status is a module-as-singleton for publishing notices at any time
 # -stdlib Imports-
 from __future__ import annotations
 from enum import Enum
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING
 import logging
 from dataclasses import dataclass, field
 
-# -Lynx Imports-
-if TYPE_CHECKING:
-    from lynx_sdk.components.service import Service
+# # -Lynx Imports-
 from lynx_sdk.models.endpoint import PubEndpoint
 
 # -External Imports-

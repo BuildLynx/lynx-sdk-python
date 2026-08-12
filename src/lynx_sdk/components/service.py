@@ -8,7 +8,7 @@ a Time Source, an MQTT Client, and has its own Endpoints.
 # === IMPORTS ===
 
 # -stdlib Imports-
-from typing import Dict, Callable, Optional, Tuple
+from typing import Dict, Callable, Optional
 import logging
 
 # -Lynx Imports-
@@ -22,7 +22,6 @@ from lynx_sdk.models.endpoint_args import \
     SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
     SYS_NOTICE_ENDPOINT_ARGS, \
     SUBSCRIBE_ABOUT_ENDPOINT_ARGS
-from lynx_sdk.models.network_state import NetworkState
 from lynx_sdk.models.notice import LoggingNoticeHandler
 from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError

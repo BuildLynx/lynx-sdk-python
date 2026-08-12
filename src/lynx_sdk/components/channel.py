@@ -12,14 +12,11 @@ from typing import Callable, Dict, List, Any, Optional, TYPE_CHECKING
 from copy import deepcopy
 import threading
 import time
-import itertools
-from functools import partial
-from dataclasses import dataclass
 
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType, ComponentState
 from lynx_sdk.components.client_component import ClientComponent
-from lynx_sdk.models.endpoint import SubEndpoint, PubEndpoint
+from lynx_sdk.models.endpoint import PubEndpoint
 from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_POLL_ENDPOINT_ARGS, \
     CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \

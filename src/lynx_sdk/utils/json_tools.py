@@ -7,7 +7,6 @@ This module provides tools for validating JSON objects and JSON schemas.
 # === IMPORTS ===
 
 # -stdlib Imports-
-import copy
 
 # -Lynx Imports-
 

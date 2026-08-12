@@ -23,7 +23,6 @@ from lynx_sdk.models.endpoint_args import \
     SUBSCRIBE_ABOUT_ENDPOINT_ARGS
 from lynx_sdk.models.notice import LoggingNoticeHandler
 from lynx_sdk.utils.mqtt_client import InboundMessage
-from lynx_sdk.utils.datastructures import deep_merge
 from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
 
 # -External Imports-
