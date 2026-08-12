@@ -1,3 +1,4 @@
+<!-- Generative AI was used in the Creation/Modification of this file -->
 # Lynx Protocol Documentation -- Outline
 
 This outline describes the structure and contents of `protocol.md`.
@@ -82,13 +83,21 @@ This outline describes the structure and contents of `protocol.md`.
   - `{serviceId}/{channelId}/!/Stop` -- halt active stream; `replyTopics: ["{serviceId}/@/About"]`, `dataOutput: false`
   - `{serviceId}/{channelId}/<` -- data output (pub, no `replyTopics`/`dataOutput`)
 - **Mermaid diagram**: Poll/Stream/Stop sequence diagram
-- Output format: JSON array of `[{s, ns, data}, ...]`
-- Stream parameters: `interval`, `numSamples`, `paginate`
+- Output format: JSON array of `[{s, ns, data}, ...]` (array MAY be empty)
+- Stream parameters: `contents`, `sampleInterval`, `numSamples`, `batch.maxInterval`, `batch.maxSamples`
+- Batching as discrete operations independent of sampling:
+  - `start_stream`, `add_sample`, `on_max_interval`, `flush`, `end_stream`
+  - Timer starts at Stream start; resets on every non-final flush
+  - Either batch limit flushes; `maxInterval` with an empty buffer publishes `[]`
+  - `0` disables that limit; both `0` holds until stream end
+  - `contents` filtering happens before a yield enters the batch (discarded yields do not count toward `maxSamples` or `numSamples`)
+  - `[]` is not end-of-stream; About `status.command` is
+  - Operations MUST be serializable so publishing can later live on an application event loop
 - The `contents` filtering mechanism:
   - Boolean mode (`true` = all, `false` = change-of-value)
   - Dict mode (select specific keys)
   - String mode (xxhash-based change detection)
-- The `PayloadBuilder` and pagination
+- The sample function: `continue_sampling` / `sampleInterval` vs batch flush
 - Python SDK example: defining a Channel with a generator
 
 ## 8. Nodes
@@ -105,7 +114,7 @@ This outline describes the structure and contents of `protocol.md`.
 
 - Two distinct timestamp layers:
   1. **MQTT v5 User Properties** (`s`, `ns`) -- added at publish time from TimeSource
-  2. **Channel-relative sample timestamps** -- `s`/`ns` in the output array, relative to stream start via `perf_counter_ns`
+  2. **Channel-relative sample timestamps** -- `s`/`ns` in the output array, relative to stream start via `perf_counter_ns` (do not reset per batch). Empty `[]` messages have no sample timestamps; MQTT user properties still stamp publish time.
 - TimeSource variants:
   - `UnixTimeSource` -- standard Unix epoch (1970)
   - `Epoch2000TimeSource` -- for MicroPython devices using 2000 epoch
@@ -134,11 +143,11 @@ This outline describes the structure and contents of `protocol.md`.
 - `@/About` payload (Node variant with `services`, `childNodes`); endpoint metadata includes `replyTopics`
 - `@/Notice` payload
 - `!/Poll` request
-- `!/Stream` request
+- `!/Stream` request (`sampleInterval`, `numSamples`, `batch`)
 - `!/Stop` request
-- `<` channel output array
+- `<` channel output array (empty array valid)
 
 ## Appendix B: Protocol Version History
 
-- `A1.0` -- Initial version.
-- `A2.0` -- Allowed user event loop-owned publishing. Added `replyTopics` and `dataOutput` on endpoint About metadata, `status.connection`, and `status.operation` fields. Significant changes to Stream command.
+- `A1.0` -- Initial version. Stream used `interval` and `paginate`.
+- `A2.0` -- Allowed user event loop-owned publishing. Added `replyTopics` and `dataOutput` on endpoint About metadata, `status.connection`, and `status.operation` fields. Stream: `interval`/`paginate` replaced by `sampleInterval` and `batch` (`maxInterval`, `maxSamples`); discrete sampling-independent batching; empty `[]` data messages.

@@ -8,10 +8,9 @@ Channel class for Lynx. A Channel is the encapsulation of a single input and/or 
 
 # -stdlib Imports-
 from __future__ import annotations
-from typing import Callable, Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Callable, Dict, Any, Optional, TYPE_CHECKING
 from copy import deepcopy
 import threading
-import time
 
 # -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType
@@ -22,6 +21,12 @@ from lynx_sdk.models.endpoint_args import \
     CHANNEL_CMD_STREAM_ENDPOINT_ARGS, \
     CHANNEL_CMD_STOP_ENDPOINT_ARGS, \
     CHANNEL_OUT_DATA_ENDPOINT_ARGS
+from lynx_sdk.components.stream_batcher import (
+    StreamBatcher,
+    DEFAULT_NUM_SAMPLES,
+    DEFAULT_SAMPLE_INTERVAL,
+    resolve_batch_limits,
+)
 from lynx_sdk.utils.json_tools import validate_json_schema, trim_payload_by_contents, PayloadBuildingError
 from lynx_sdk.utils.mqtt_client import InboundMessage
 from lynx_sdk.utils.structures import LYNX_VERSION
@@ -46,70 +51,6 @@ import jsonschema
 
 
 # === CLASSES ===
-
-class PayloadBuilder:
-    """
-    Helper class to build a payload for the channel's output data endpoint, mainly used by Stream channels.
-    """
-    def __init__(self, contents: Dict[str, Any] | bool, paginate: int, out_data_endpoint: OutEndpoint, service: Service):
-        """
-        Initialize a PayloadBuilder object.
-        Args:
-            contents: The contents of the payload.
-            paginate: The number of samples to paginate.
-            out_data_endpoint: The endpoint to publish the payload to.
-            service: The service to use for logging.
-        """
-        self.contents: Dict[str, Any] | bool = contents
-        self.data_list: List[Dict[str, Any]] = []
-        self.perf_counter: int = time.perf_counter_ns()
-        self.paginate: int = paginate
-        self.out_data_endpoint: OutEndpoint = out_data_endpoint
-        self.service: Service = service
-        self.last_data: Any = None
-    
-    def add_data(self, data: Any):
-        """
-        Add data to the payload builder.
-        """
-
-        if len(self.data_list) == 0:
-            self.perf_counter = time.perf_counter_ns()
-            current_perf_counter_diff = 0
-        else:
-            current_perf_counter_diff = time.perf_counter_ns()-self.perf_counter
-        
-        if self.contents is not True:
-            try:
-                data = trim_payload_by_contents(data, self.contents, self.last_data)
-                if data == {}: # Data is empty when contents change-of-value values are all the same as last data
-                    return
-            except PayloadBuildingError as e:
-                self.service.logger.error(f"Error trimming payload: {e.message}")
-                return
-        
-        self.data_list.append({
-            "s": current_perf_counter_diff // int(1e9),
-            "ns": current_perf_counter_diff % int(1e9),
-            "data": data
-        })
-
-        if len(self.data_list) >= self.paginate:
-            self.publish()
-
-        self.last_data = data
-        
-
-    def publish(self):
-        """
-        Publish the payload to the output data endpoint.
-        """
-        if len(self.data_list) == 0:
-            return
-        self.out_data_endpoint.publish(payload=self.data_list)
-        self.data_list = []
-        self.perf_counter = time.perf_counter_ns()
-
 
 class Channel(Component):
     def __init__(self,
@@ -156,6 +97,8 @@ class Channel(Component):
         self.service: Service = service
         self._sample_function: Callable[[InboundMessage], Any] = sample_function
         self._exit_flag: threading.Event = threading.Event() # Flag to signal polling/streaming thread to exit
+        self._stream_batcher: Optional[StreamBatcher] = None
+        self._stream_thread: Optional[threading.Thread] = None
 
         self.cmd_poll_endpoint = self.new_in_endpoint(self.poll_handler, **CHANNEL_CMD_POLL_ENDPOINT_ARGS)
         self.cmd_stream_endpoint = self.new_in_endpoint(self.start_stream_handler, **CHANNEL_CMD_STREAM_ENDPOINT_ARGS)
@@ -168,7 +111,7 @@ class Channel(Component):
 
         self.config: Dict[str, Any] = config
         if self.config.get("streamOnStartup", False):
-            self.start_stream_handler(msg=InboundMessage(topic="", payload={"contents": True, "numSamples": 0, "paginate": 1}))
+            self.start_stream_handler(msg=InboundMessage(topic="", payload={"contents": True}))
 
 
     def get_client_component(self) -> ClientComponent:
@@ -200,65 +143,83 @@ class Channel(Component):
 
     def start_stream_handler(self, msg: InboundMessage):
         """
-        Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
-         The start stream function should call the callback with each new piece of data to be published.
+        Handle a stream start request. Sampling runs on a thread; batch flushes
+        (including empty keepalives and Stop) are independent of that thread.
         """
         active = self._status.get("command")
-        if isinstance(active, dict) and active.get("command") == "Stream":
+        thread_busy = self._stream_thread is not None and self._stream_thread.is_alive()
+        if (isinstance(active, dict) and active.get("command") == "Stream") or thread_busy:
             self.service.logger.warning(f"Channel '{self.id}' is already streaming, ignoring stream start request.")
             return
         
         payload = msg.payload
         contents = payload.get("contents", True)
-        num_samples = payload.get("numSamples", 0)
-        paginate = payload.get("paginate", 1)
-        if paginate == 0:
-            paginate = num_samples
+        num_samples = int(payload.get("numSamples", DEFAULT_NUM_SAMPLES))
+        max_interval, max_samples = resolve_batch_limits(payload)
 
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
         self._exit_flag.clear()
         self.set_status(command={"command": "Stream", "payload": msg.payload})
-        payload_builder = PayloadBuilder(contents=contents, paginate=paginate, out_data_endpoint=self.out_data_endpoint, service=self.service)
-        stream_thread = threading.Thread(target=self._stream_handler, kwargs={"request": msg, "payload_builder": payload_builder, "num_samples": num_samples})
+        batcher = StreamBatcher(
+            contents=contents,
+            max_interval=max_interval,
+            max_samples=max_samples,
+            num_samples=num_samples,
+            publish=self.out_data_endpoint.publish,
+            logger=self.service.logger,
+            on_ended=self._on_stream_ended)
+        batcher.start()
+        self._stream_batcher = batcher
+        stream_thread = threading.Thread(
+            target=self._stream_handler,
+            kwargs={"request": msg, "batcher": batcher},
+            daemon=True)
+        self._stream_thread = stream_thread
         stream_thread.start()
 
     
-    def _stream_handler(self, request: InboundMessage, payload_builder: PayloadBuilder, num_samples: int):
+    def _on_stream_ended(self):
         """
-        Handle a stream request.
+        Called once when the batcher ends the stream (Stop, numSamples, or generator finish).
         """
-        samples_processed = 0
+        self._exit_flag.set()
+        self.set_status(command=None)
 
-        def continue_sampling(default_interval: float = 1.0):
+    
+    def _stream_handler(self, request: InboundMessage, batcher: StreamBatcher):
+        """
+        Run the sample function. Each yield is add_sample; publishing is the batcher's job.
+        """
+        def continue_sampling(default_interval: float = DEFAULT_SAMPLE_INTERVAL):
             """
-            Determine if the sampling should continue based on the default interval.
+            Determine if the sampling should continue.
             Args:
-                default_interval: The default timeout interval in seconds if none is specified in stream request message.
+                default_interval: Sleep used when the Stream payload omits sampleInterval.
             Returns:
                 True if the sampling should continue, False otherwise.
             """
-            interval = request.payload.get("interval", default_interval)
+            interval = request.payload.get("sampleInterval", default_interval)
             return not self._exit_flag.wait(timeout=interval)
 
-        for data in self._sample_function(request=request, continue_sampling=continue_sampling):
-            if num_samples > 0 and samples_processed >= num_samples:
-                break
-            if self._exit_flag.wait(timeout=0.001):
-                break
-            payload_builder.add_data(data)
-            samples_processed += 1
-    
-        payload_builder.publish()
-        self._exit_flag.set()
-        self.set_status(command=None)
+        try:
+            for data in self._sample_function(request=request, continue_sampling=continue_sampling):
+                if self._exit_flag.is_set():
+                    break
+                if not batcher.add_sample(data):
+                    break
+        finally:
+            batcher.end_stream()
 
 
     def stop_handler(self, msg: InboundMessage):
         """
-        Stop the channel's polling/streaming.
+        Stop the channel's polling/streaming. Flushes immediately, even if the
+        sample function is blocked.
         """
         self._exit_flag.set()
+        if self._stream_batcher is not None:
+            self._stream_batcher.end_stream()
 
 
     def produce_about(self) -> Dict:

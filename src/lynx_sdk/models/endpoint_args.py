@@ -232,26 +232,41 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
             "default": {},
             "type": ["object", "boolean"]
         },
-        "interval": {
+        "sampleInterval": {
             "title": "Sample Interval",
-            "description": "Seconds between samples",
+            "description": "Requested seconds between samples. 0 = as fast as the generator allows.",
             "default": 1.0,
             "type": "number",
             "minimum": 0
         },
         "numSamples": {
             "title": "Number of Samples",
-            "description": "1 for single, 0 for infinite, positive int for numbered, default 0",
+            "description": "Total samples to admit into batches. 0 = infinite. Counts only yields that enter the batch after contents filtering.",
             "default": 0,
             "type": "integer",
             "minimum": 0
         },
-        "paginate": {
-            "title": "Paginate",
-            "description": "0 for no pagination (all data in one payload), positive int for page size, default 1",
-            "default": 1,
-            "type": "integer",
-            "minimum": 0
+        "batch": {
+            "title": "Batch",
+            "description": "Flush limits for the open batch. Omitted object or omitted fields use the field defaults.",
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "maxInterval": {
+                    "title": "Max Interval",
+                    "description": "Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).",
+                    "default": 300,
+                    "type": "number",
+                    "minimum": 0
+                },
+                "maxSamples": {
+                    "title": "Max Samples",
+                    "description": "Max samples per published message. 0 = no count limit.",
+                    "default": 1,
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
         }
     }
 }
@@ -266,7 +281,7 @@ CHANNEL_CMD_STOP_ENDPOINT_ARGS = {
 
 CHANNEL_OUT_DATA_ENDPOINT_ARGS = {
     "topic": "<",
-    "description": "Output data from the channel.",
+    "description": "Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.",
     "default_qos": 0,
     "default_retain": False,
     "payload_schema": {

@@ -61,12 +61,12 @@ A Lynx network can run with just a Service connected to any MQTT broker -- Nodes
 - **Schema-enforced IoT data pipelines.** Every Channel declares its output schema. Consumers know the shape of the data before the first sample arrives.
 - **Self-describing, discoverable service networks.** No external service registry needed. Subscribe to `+/@/About` and the network describes itself.
 - **Rapid prototyping.** Define a Service, attach a Channel with a generator function, call `start()`. Data flows in seconds.
-- **Lightweight data acquisition (DAQ) systems.** Stream parameters (`interval`, `numSamples`, `paginate`) give fine-grained control over sampling without custom protocol work.
+- **Lightweight data acquisition (DAQ) systems.** Stream parameters (`sampleInterval`, `numSamples`, `batch`) give fine-grained control over sampling rate and how samples are grouped into published messages.
 
 ### 3.2 Non-Ideal Fits
 
 - **No TCP/IP network available.** Lynx is built on MQTT which requires TCP/IP. Additionally an MQTT broker or Lynx Node is required.
-- **Heavy computation inside sampling loops.** Channel sampling runs in a thread with a cooperative `continue_sampling()` check. CPU-bound or long-blocking work inside the generator can starve other channels or delay Stop commands.
+- **Heavy computation inside sampling loops.** CPU-bound or long-blocking work inside the sample function delays sample production. Batch flushes (including empty keepalives and the stream-end flush) MUST proceed independently of the sample function, but a blocked generator still cannot produce new samples until it returns.
 - **Non-JSON / binary payloads.** Lynx payloads are JSON objects. Large binary data (images, video, raw ADC buffers) would need base64 encoding or an out-of-band mechanism.
 - **Very large-scale deployments (1k+ devices).** Every Service publishes a retained `@/About` message. At extreme scale, the broker's retained message store and the wildcard subscription `+/@/About` may become bottlenecks.
 - **RPC-heavy / request-response architectures.** Lynx is oriented around pub/sub data streams, not request-response patterns. While `?/About` is a query-response pattern, Channels are one-directional output streams.
@@ -457,26 +457,27 @@ sequenceDiagram
 
     rect rgb(230, 245, 255)
         Note over C,Out: Stream (continuous)
-        C->>Ch: !/Stream {interval: 0.5, numSamples: 0, paginate: 1}
+        C->>Ch: !/Stream {sampleInterval: 0.5, numSamples: 0, batch: {maxInterval: 300, maxSamples: 1}}
         Ch->>Ch: Set status.command = {command: Stream, payload: ...}
-        loop While continue_sampling() and not stopped
-            Ch->>Ch: yield sample
-            Ch->>Out: [{s, ns, data}]
+        Ch->>Ch: Open empty batch, start batch timer
+        loop Until Stop, numSamples reached, or generator ends
+            Ch->>Ch: yield sample (at sampleInterval)
+            Note over Ch,Out: Flush when maxSamples or maxInterval is reached (see 7.5)
         end
     end
 
     rect rgb(255, 240, 240)
-        Note over C,Out: Stop
+        Note over C,Out: Stop / stream end
         C->>Ch: !/Stop {}
         Ch->>Ch: Set exit flag
-        Ch->>Ch: Flush remaining samples
+        Ch->>Out: Remaining samples, or [] if the buffer is empty
         Ch->>Ch: Set status.command = null
     end
 ```
 
 ### 7.3 Output Format
 
-Channel output is always a **JSON array** of sample objects:
+Channel output is always a **JSON array** of sample objects. The array MAY be empty (`[]`).
 
 ```json
 [
@@ -503,20 +504,109 @@ Channel output is always a **JSON array** of sample objects:
 | `ns` | integer | Nanoseconds remainder (0 to 999,999,999) |
 | `data` | object | The sample data, validated against the channel's `output_data_schema` |
 
-Timestamps are **relative to the start of the current stream** (or zero for a Poll), measured via a high-resolution performance counter.
+Timestamps are **relative to the start of the current stream** (or zero for a Poll), measured via a high-resolution performance counter. They do **not** reset when a batch is published -- every sample in every batch of a stream shares the same origin (see section 9.2).
+
+An empty array `[]` is a valid data message. It is published when a batch flush occurs with no samples in the buffer (a keepalive / idle window, or a stream-end flush of an empty buffer). `[]` is **not** an end-of-stream marker -- consumers detect stream end from `status.command` becoming `null` on About.
 
 ### 7.4 Stream Parameters
 
-The `!/Stream` request payload accepts these parameters:
+The `!/Stream` request payload accepts these parameters. Omitted fields use the defaults below.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `contents` | object \| boolean | `{}` (= all) | Filter which keys to include in output data (see section 4.6) |
-| `interval` | number | 1.0 | Seconds between samples. The sample function can override this via `continue_sampling(default_interval=...)`. |
-| `numSamples` | integer | 0 | Total samples to collect. `0` = infinite, `1` = single, `n` = exactly n. |
-| `paginate` | integer | 1 | Number of samples per published message. `0` = collect all samples into one message, `n` = publish every n samples. |
+| `contents` | object \| boolean | `{}` (= all) | Filter which keys to include in output data (see section 7.6) |
+| `sampleInterval` | number | `1.0` | Requested seconds between samples. `0` = sample as fast as the generator allows. |
+| `numSamples` | integer | `0` | Total samples to admit into batches. `0` = infinite, `n` = stop after n admitted samples. |
+| `batch` | object | see below | Flush limits for the open batch. Omitted `batch` (or omitted fields inside it) uses the field defaults. |
 
-### 7.5 The `contents` Filtering Mechanism
+**`batch` object:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxInterval` | number | `300` | Max seconds an open batch may wait before it is published. `0` = no time limit (time-based flush disabled, including empty keepalives). |
+| `maxSamples` | integer | `1` | Max samples in one published message. `0` = no count limit. |
+
+`!/Poll` does not accept `sampleInterval`, `numSamples`, or `batch`. Poll is always one sample in one message.
+
+Example -- high-rate DAQ, flush on count or time:
+
+```json
+{
+  "sampleInterval": 0.001,
+  "batch": {
+    "maxInterval": 0.1,
+    "maxSamples": 1000
+  }
+}
+```
+
+Up to 1000 samples per message, or a flush every 0.1 s, whichever happens first. If 0.1 s elapses with nothing in the buffer, the channel publishes `[]`.
+
+### 7.5 Batching
+
+Sampling and batching are **separate operations**. A Stream maintains one **open batch** (a buffer of samples not yet published) and a **batch timer**. Implementations MUST honor the flush rules below even if the sample function is blocked or slow. How the runtime is scheduled -- SDK thread today, application event loop later -- is out of band; the operations and their triggers are not.
+
+```mermaid
+stateDiagram-v2
+    [*] --> OpenBatch: Stream accepted\n(open empty batch, start timer)
+    OpenBatch --> Flush: maxSamples reached\n(and maxSamples != 0)
+    OpenBatch --> Flush: maxInterval elapsed\n(and maxInterval != 0)
+    OpenBatch --> Flush: stream end
+    Flush --> OpenBatch: publish buffer or []\nclear buffer, restart timer
+    Flush --> Idle: stream is ending\n(after that one flush)
+    Idle --> [*]
+```
+
+#### Operations
+
+| Operation | When | Effect |
+|-----------|------|--------|
+| **start_stream** | `!/Stream` accepted | Set `status.command`. Open an empty batch. Start the batch timer. Begin sampling at `sampleInterval`. |
+| **add_sample** | The sample function yields a value | Apply `contents` filtering. If the result is empty, **discard** the yield -- it does not enter the batch and does not count toward `batch.maxSamples` or `numSamples`. Otherwise append it with stream-relative `s`/`ns`. If `maxSamples > 0` and the buffer length is now `>= maxSamples`, **flush**. If `numSamples > 0` and admitted samples now equal `numSamples`, **end_stream**. |
+| **on_max_interval** | `maxInterval > 0` and that many seconds have elapsed since the timer started or last reset | **flush**, even if the buffer is empty. MUST fire independently of the sample function. |
+| **flush** | Any trigger above | Publish the buffer to `<` as a JSON array. If the buffer is empty, publish `[]`. Clear the buffer. If the stream is still active, restart the batch timer. The stream-end flush does not open a new batch. |
+| **end_stream** | `!/Stop`, `numSamples` reached, or the sample function finishes | **flush** once (including `[]` if the buffer is already empty). Set `status.command` to `null`. |
+
+These operations on a given channel MUST be serialized: a sample is admitted to exactly one batch, and a flush publishes exactly the samples admitted since the previous flush. `add_sample` and `on_max_interval` must not interleave mid-operation.
+
+The batch timer **starts at Stream start**, before any samples, and **resets on every count, time, or empty flush**. The stream-end flush does not reset it. A new open batch never inherits leftover time from the previous one.
+
+Whichever limit is reached first flushes the current batch. If both would fire at the same instant, publish **one** message, not two.
+
+#### Limit values of `0`
+
+| `maxInterval` | `maxSamples` | Behavior |
+|---------------|--------------|----------|
+| `> 0` | `> 0` | Flush when either limit is reached (including `[]` on timeout with an empty buffer). |
+| `> 0` | `0` | Time-only: flush every `maxInterval` seconds, including `[]` when idle. Count never triggers. |
+| `0` | `> 0` | Count-only: flush when the buffer reaches `maxSamples`. No empty keepalives. |
+| `0` | `0` | Hold until stream end. One final publish of the entire buffer (or `[]` if nothing was admitted). Unbounded memory if the stream is long. |
+
+#### `numSamples` vs `batch.maxSamples`
+
+- `batch.maxSamples` is per published message.
+- `numSamples` is the stream-lifetime cap on samples **admitted into batches** (after `contents` filtering). `0` means no cap.
+- Reaching `numSamples` ends the stream (one final flush). It does not change how the open batch flushes before that.
+
+#### Empty arrays are not end-of-stream
+
+`[]` is published whenever a flush runs against an empty buffer: an idle `maxInterval` window, or a final flush after the last count-based publish already emptied the buffer. A stream that ends with samples still buffered publishes those samples and does **not** send an extra trailing `[]`. Consumers MUST use About `status.command`, not `[]`, to detect that a stream has ended.
+
+#### Independence from the sample function
+
+`on_max_interval` and `end_stream` (from `!/Stop`) MUST be able to **flush** while the sample function is blocked. `add_sample` is the only operation that depends on the generator. This keeps batching well-defined when publishing later moves to an application-owned event loop: the loop is responsible for invoking these operations on time; the channel definition only declares the rules.
+
+#### Worked examples
+
+**Default-like Stream** (`{}` or omitted `batch`): `sampleInterval=1.0`, `maxInterval=300`, `maxSamples=1`. Each admitted sample publishes immediately as a one-element array. `[]` appears only if nothing is admitted for 300 s (blocked generator, or every yield dropped by `contents`).
+
+**High-rate DAQ** (`sampleInterval=0.001`, `maxInterval=0.1`, `maxSamples=1000`): a full batch of 1000 publishes as soon as it fills; otherwise the open batch publishes at 0.1 s. Silence for 0.1 s yields `[]`.
+
+**`numSamples=5`, `maxSamples=1`:** five one-sample messages, then a final `[]` because the fifth flush already emptied the buffer.
+
+**`numSamples=5`, `maxSamples=10`:** five samples accumulate, then stream end flushes those five. No extra `[]`.
+
+### 7.6 The `contents` Filtering Mechanism
 
 The `contents` parameter provides flexible control over what data is included in channel output and About responses. It operates recursively on the payload:
 
@@ -535,13 +625,15 @@ The `contents` parameter provides flexible control over what data is included in
 ```
 Select specific keys. Each key maps to its own `contents` rule (can nest dicts for deep structures). Keys set to `true` are always included; keys set to `false` use change-of-value.
 
+On a Stream, `contents` is applied **before** a yield enters the open batch. A yield that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`.
+
 **String mode (xxhash):**
 ```json
 "a3b2c1d0"
 ```
 The string is interpreted as an xxh32 hex digest. The payload is hashed and compared. If it matches, nothing is returned (no change). If it differs, the new hash (or the full payload) is returned.
 
-### 7.6 The Sample Function
+### 7.7 The Sample Function
 
 A Channel's data source is a **generator function** with the signature:
 
@@ -552,10 +644,12 @@ def sample_function(request: InboundMessage, continue_sampling: Callable) -> Gen
 ```
 
 - `request` -- the original Poll or Stream message, including any parameters.
-- `continue_sampling(default_interval)` -- returns `True` if the Channel should keep sampling, `False` if a Stop was received or the exit flag was set. The `default_interval` sets the sleep time between samples (overridden by the request's `interval` parameter).
-- Each `yield` produces one sample that the Channel wraps in `{s, ns, data}` and publishes.
+- `continue_sampling(default_interval)` -- returns `True` if the Channel should keep sampling, `False` if a Stop was received or the stream has ended. The `default_interval` is the sleep used when the Stream payload omits `sampleInterval`. A present `sampleInterval` overrides it. `sampleInterval` (or the default) of `0` means no sleep -- sample as fast as the generator allows.
+- Each `yield` is offered to the batcher (`add_sample`). It is not published by itself. Publishing happens only on **flush** (see section 7.5).
 
-### 7.7 Python SDK Example
+Sampling cadence (`sampleInterval`) and batch flush (`batch.maxInterval` / `batch.maxSamples`) are independent. A slow yield delays the next `add_sample`; it must not delay `on_max_interval` or a Stop-driven `end_stream`.
+
+### 7.8 Python SDK Example
 
 **Decorator style:**
 
@@ -723,7 +817,9 @@ This means:
 - Sample 2 was taken 500ms after stream start.
 - Sample 3 was taken 1 second after stream start.
 
-For a Poll, both `s` and `ns` are always `0` (single sample, no relative offset).
+The origin is the start of the Stream, not the start of the current batch. Publishing a batch (including an empty `[]`) does not reset sample `s`/`ns`.
+
+For a Poll, both `s` and `ns` are always `0` (single sample, no relative offset). Empty `[]` messages have no sample timestamps; MQTT v5 User Properties on the publish still record when the message was sent (section 9.1).
 
 ### 9.3 TimeSource Variants
 
@@ -1106,25 +1202,38 @@ Extends the Service About schema with `services` and `child_nodes`:
     "contents": {
       "type": ["object", "boolean"],
       "default": {},
-      "description": "Filter which keys to include in output data."
+      "description": "Filter which keys to include in output data. Applied before a yield enters the open batch."
     },
-    "interval": {
+    "sampleInterval": {
       "type": "number",
       "default": 1.0,
       "minimum": 0,
-      "description": "Seconds between samples."
+      "description": "Requested seconds between samples. 0 = as fast as the generator allows."
     },
     "numSamples": {
       "type": "integer",
       "default": 0,
       "minimum": 0,
-      "description": "Total samples to collect. 0 = infinite."
+      "description": "Total samples to admit into batches. 0 = infinite. Counts only yields that enter the batch after contents filtering."
     },
-    "paginate": {
-      "type": "integer",
-      "default": 1,
-      "minimum": 0,
-      "description": "Samples per published message. 0 = all in one message."
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Flush limits for the open batch. Omitted object or omitted fields use the field defaults.",
+      "properties": {
+        "maxInterval": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "description": "Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives)."
+        },
+        "maxSamples": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 0,
+          "description": "Max samples per published message. 0 = no count limit."
+        }
+      }
     }
   }
 }
@@ -1147,6 +1256,7 @@ Extends the Service About schema with `services` and `child_nodes`:
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "array",
+  "description": "Zero or more timestamped samples. An empty array is a valid Stream message (idle keepalive or empty stream-end flush).",
   "items": {
     "type": "object",
     "additionalProperties": false,
@@ -1174,4 +1284,5 @@ Extends the Service About schema with `services` and `child_nodes`:
 
 | Version | Status | Notes |
 |---------|--------|-------|
-| `A-01.01` | Current | Initial protocol version. Defines Services, Channels, Nodes, About, Notice, contents filtering, and the topic naming conventions described in this document. |
+| `A1.0` | Superseded | Initial protocol version. Defined Services, Channels, Nodes, About, Notice, contents filtering, and the topic naming conventions. Stream used `interval` and `paginate`. |
+| `A2.0` | Current | `replyTopics` and `dataOutput` on endpoint About metadata. Stream command: `interval`/`paginate` replaced by `sampleInterval` and `batch` (`maxInterval`, `maxSamples`). Batching is a discrete, sampling-independent set of operations; empty `[]` data messages are valid. Sample timestamps are stream-relative and do not reset per batch. |
