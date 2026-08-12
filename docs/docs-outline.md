@@ -1,4 +1,3 @@
-<!-- Generative AI was used in the Creation/Modification of this file -->
 # Lynx Protocol Documentation -- Outline
 
 This outline describes the structure and contents of `protocol.md`.
@@ -94,7 +93,8 @@ This outline describes the structure and contents of `protocol.md`.
   - `[]` is not end-of-stream; About `status.command` is
   - Operations MUST be serializable so publishing can later live on an application event loop
 - The `contents` filtering mechanism:
-  - Boolean mode (`true` = all, `false` = change-of-value)
+  - Boolean mode (`true` / omitted = all, `false` = change-of-value)
+  - Empty object (`{}` = select no keys; nested `{}` keeps the key with an empty value)
   - Dict mode (select specific keys)
   - String mode (xxhash-based change detection)
 - The sample function: `continue_sampling` / `sampleInterval` vs batch flush

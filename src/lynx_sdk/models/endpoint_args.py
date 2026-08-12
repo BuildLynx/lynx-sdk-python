@@ -16,8 +16,8 @@ GET_ABOUT_ENDPOINT_ARGS = {
     "payload_schema": {
         "contents": {
             "title": "contents Object",
-            "description": "Refer to Lynx standard contents argument for details.",
-            "default": {},
+            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
+            "default": True,
             "type": ["object", "boolean"]
         }
     }
@@ -213,8 +213,8 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "payload_schema": {
         "contents": {
             "title": "Values to contents",
-            "description": "Default everything to true if empty",
-            "default": {},
+            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
+            "default": True,
             "type": ["object", "boolean"]
         }
     }
@@ -228,8 +228,8 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
     "payload_schema": {
         "contents": {
             "title": "Values to contents",
-            "description": "Default everything to true if empty",
-            "default": {},
+            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
+            "default": True,
             "type": ["object", "boolean"]
         },
         "sampleInterval": {

@@ -1,4 +1,3 @@
-# Generative AI was used in the Creation/Modification of this file
 # Device Watcher
 
 Watches the device running this service and publishes statistics.
@@ -43,8 +42,8 @@ Watches the device running this service and publishes statistics.
 > Query information about the Component.
 
 
-- `contents` **object | boolean** — Refer to Lynx standard contents argument for details.  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 
 </details>
 
@@ -80,8 +79,8 @@ Polls the CPU load
 > Start polling at a set time interval on the channel for data.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 
 </details>
 
@@ -92,8 +91,8 @@ Polls the CPU load
 > Start streaming on the channel, emitting data when available.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 - `interval` **number** — Seconds between samples  
   `default: 1.0` `minimum: 0`
 - `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
@@ -143,8 +142,8 @@ RAM status of the system
 > Start polling at a set time interval on the channel for data.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 
 </details>
 
@@ -155,8 +154,8 @@ RAM status of the system
 > Start streaming on the channel, emitting data when available.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 - `interval` **number** — Seconds between samples  
   `default: 1.0` `minimum: 0`
 - `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
@@ -212,8 +211,8 @@ Emit the time every time the second changes
 > Start polling at a set time interval on the channel for data.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 
 </details>
 
@@ -224,8 +223,8 @@ Emit the time every time the second changes
 > Start streaming on the channel, emitting data when available.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 - `interval` **number** — Seconds between samples  
   `default: 1.0` `minimum: 0`
 - `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
@@ -278,8 +277,8 @@ Emit a random integer between 1 and 3
 > Start polling at a set time interval on the channel for data.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 
 </details>
 
@@ -290,8 +289,8 @@ Emit a random integer between 1 and 3
 > Start streaming on the channel, emitting data when available.
 
 
-- `contents` **object | boolean** — Default everything to true if empty  
-  `default: {}`
+- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
+  `default: True`
 - `interval` **number** — Seconds between samples  
   `default: 1.0` `minimum: 0`
 - `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  

@@ -1,4 +1,3 @@
-<!-- Generative AI was used in the Creation/Modification of this file -->
 # The Lynx Protocol
 
 **Version: A2.0**
@@ -151,7 +150,8 @@ A filtering mechanism that lets consumers request only the parts of a payload th
 
 | `contents` value | Behavior |
 |------------------|----------|
-| `true` (or `{}`) | Return the full payload. |
+| `true` (or omitted) | Return the full payload. |
+| `{}` | Select no keys. Returns an empty object. When nested (e.g. `"channels": {}`), the parent key is kept with an empty object value. |
 | `false` | Return only values that changed since the last sample (change-of-value). |
 | `{"key1": true, "key2": false}` | Select specific keys; per-key `true`/`false` controls inclusion or change-of-value. |
 | `"<xxh32 hex string>"` | Return the payload only if its xxh32 hash differs from the provided hash. |
@@ -514,7 +514,7 @@ The `!/Stream` request payload accepts these parameters. Omitted fields use the 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `contents` | object \| boolean | `{}` (= all) | Filter which keys to include in output data (see section 7.6) |
+| `contents` | object \| boolean | `true` | Filter which keys to include in output data (see section 7.6). Omit or `true` for all; `{}` selects no keys. |
 | `sampleInterval` | number | `1.0` | Requested seconds between samples. `0` = sample as fast as the generator allows. |
 | `numSamples` | integer | `0` | Total samples to admit into batches. `0` = infinite, `n` = stop after n admitted samples. |
 | `batch` | object | see below | Flush limits for the open batch. Omitted `batch` (or omitted fields inside it) uses the field defaults. |
@@ -611,8 +611,11 @@ Whichever limit is reached first flushes the current batch. If both would fire a
 The `contents` parameter provides flexible control over what data is included in channel output and About responses. It operates recursively on the payload:
 
 **Boolean mode:**
-- `true` (or `{}`) -- include the full payload, no filtering.
+- `true` (or omitted) -- include the full payload, no filtering.
 - `false` -- change-of-value mode. Only include values that differ from the previous sample.
+
+**Empty object:**
+- `{}` -- select no keys. Returns `{}`. When used as a nested rule (e.g. `"channels": {}`), the parent key is kept and its value is `{}` (the full subtree is not included).
 
 **Dict mode:**
 ```json
@@ -623,9 +626,9 @@ The `contents` parameter provides flexible control over what data is included in
   "free": false
 }
 ```
-Select specific keys. Each key maps to its own `contents` rule (can nest dicts for deep structures). Keys set to `true` are always included; keys set to `false` use change-of-value.
+Select specific keys. Each key maps to its own `contents` rule (can nest dicts for deep structures). Keys set to `true` are always included; keys set to `false` use change-of-value. An empty nested rule such as `"channels": {}` keeps the `channels` key with an empty object value.
 
-On a Stream, `contents` is applied **before** a yield enters the open batch. A yield that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`.
+On a Stream, `contents` is applied **before** a yield enters the open batch. A yield that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`. The same empty-object rule applies at the top level: a Stream with `"contents": {}` admits no samples.
 
 **String mode (xxhash):**
 ```json
@@ -1185,8 +1188,8 @@ Extends the Service About schema with `services` and `child_nodes`:
   "properties": {
     "contents": {
       "type": ["object", "boolean"],
-      "default": {},
-      "description": "Filter which keys to include in output data."
+      "default": true,
+      "description": "Filter which keys to include in output data. Omit or true for the full payload; {} selects no keys."
     }
   }
 }
@@ -1201,8 +1204,8 @@ Extends the Service About schema with `services` and `child_nodes`:
   "properties": {
     "contents": {
       "type": ["object", "boolean"],
-      "default": {},
-      "description": "Filter which keys to include in output data. Applied before a yield enters the open batch."
+      "default": true,
+      "description": "Filter which keys to include in output data. Applied before a yield enters the open batch. Omit or true for the full payload; {} selects no keys (trimmed yields are discarded)."
     },
     "sampleInterval": {
       "type": "number",

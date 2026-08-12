@@ -49,10 +49,6 @@ def resolve_batch_limits(payload: Dict[str, Any]) -> tuple[float, int]:
     return float(max_interval), int(max_samples)
 
 
-def _is_full_contents(contents: Any) -> bool:
-    return contents is True or contents == {}
-
-
 def _is_discarded_sample(data: Any) -> bool:
     return data is None or data == {}
 
@@ -79,7 +75,8 @@ class StreamBatcher:
         on_ended: Optional[Callable[[], None]] = None):
         """
         Args:
-            contents: Stream contents filter. True or {} means include all.
+            contents: Stream contents filter. True means include all; {} selects no keys
+                (trimmed yields are discarded). Same semantics as About/Poll.
             max_interval: Seconds an open batch may wait. 0 = no time limit.
             max_samples: Max samples per published message. 0 = no count limit.
             num_samples: Stream-lifetime cap on admitted samples. 0 = infinite.
@@ -126,7 +123,7 @@ class StreamBatcher:
             if self._ended:
                 return False
 
-            if not _is_full_contents(self._contents):
+            if self._contents is not True:
                 try:
                     data = trim_payload_by_contents(data, self._contents, self._last_data)
                 except PayloadBuildingError as e:
