@@ -17,7 +17,7 @@ from enum import Enum
 
 # === CONSTANTS ===
 
-LYNX_VERSION = "A-01.01"
+LYNX_VERSION = "A2.0"
 
 
 # === GLOBALS VARIABLES ===

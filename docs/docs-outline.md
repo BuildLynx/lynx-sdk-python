@@ -9,7 +9,7 @@ This outline describes the structure and contents of `protocol.md`.
 - Elevator pitch: Lynx is a Lightweight Network Extension of MQTT
 - Design philosophy: add high-value features with minimal complexity
 - What Lynx gives you on top of vanilla MQTT (self-describing services, structured data channels, automatic discovery, schema validation)
-- Protocol version: `A-01.01`
+- Protocol version: `A2.0`
 
 ## 2. Overview
 
@@ -139,4 +139,5 @@ This outline describes the structure and contents of `protocol.md`.
 
 ## Appendix B: Protocol Version History
 
-- `A-01.01` -- initial version
+- `A1.0` -- Initial version.
+- `A2.0` -- Allowed user event loop-owned publishing. Added `response_topics`, `status.connection`, and `status.operation` fields. Significant changes to Stream command.

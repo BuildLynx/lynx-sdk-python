@@ -1,6 +1,6 @@
 # The Lynx Protocol
 
-**Version: A-01.01**
+**Version: A2.0**
 
 ---
 
@@ -262,7 +262,7 @@ The `@/About` payload for a Service looks like this:
     "id": "deviceWatcher",
     "title": "Device Watcher",
     "description": "Watches the device running this service and publishes statistics.",
-    "lynx_version": "A-01.01",
+    "lynx_version": "A2.0",
     "time_source": "unix"
   },
   "config": {},
@@ -293,7 +293,7 @@ The `@/About` payload for a Service looks like this:
   "channels": {
     "cpuLoad": {
       "lynxType": "Channel",
-      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A-01.01" },
+      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.0" },
       "config": {},
       "status": { "state": "idle", "action": { "command": "", "payload": {} } },
       "endpoints": { }
@@ -550,7 +550,7 @@ A Node's About extends the base About with `services` and `child_nodes`:
     "id": "edgeNode01",
     "title": "Edge Node 01",
     "description": "Monitors sensors on floor 3.",
-    "lynx_version": "A-01.01",
+    "lynx_version": "A2.0",
     "time_source": "unix"
   },
   "config": {},
@@ -619,7 +619,7 @@ node = Node(
     id="exampleNode",
     title="Example Node",
     description="Example Node for Lynx.",
-    lynx_version="A-01.01")
+    lynx_version="A2.0")
 
 if __name__ == "__main__":
     node.start()
@@ -834,7 +834,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "id": { "type": "string", "description": "Unique identifier of the Component." },
         "title": { "type": "string", "description": "Human-readable title." },
         "description": { "type": "string", "description": "Human-readable description." },
-        "lynx_version": { "type": "string", "enum": ["A-01.01"], "description": "Lynx protocol version." },
+        "lynx_version": { "type": "string", "enum": ["A2.0"], "description": "Lynx protocol version." },
         "time_source": { "type": "string", "description": "Time source type (e.g., 'unix', 'process')." }
       }
     },
@@ -887,7 +887,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
             "id": { "type": "string" },
             "title": { "type": "string" },
             "description": { "type": "string" },
-            "lynx_version": { "type": "string", "enum": ["A-01.01"] }
+            "lynx_version": { "type": "string", "enum": ["A2.0"] }
           }
         },
         "config": { "type": "object" },
@@ -927,7 +927,7 @@ Extends the Service About schema with `services` and `child_nodes`:
         "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "lynx_version": { "type": "string", "enum": ["A-01.01"] },
+        "lynx_version": { "type": "string", "enum": ["A2.0"] },
         "time_source": { "type": "string" }
       }
     },

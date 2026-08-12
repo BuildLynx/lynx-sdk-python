@@ -5,7 +5,7 @@ Watches the device running this service and publishes statistics.
 | Property | Value |
 |----------|-------|
 | ID | `deviceWatcher` |
-| Lynx Version | A-01.01 |
+| Lynx Version | A2.0 |
 | Time Source | unix |
 
 ---
@@ -26,7 +26,7 @@ Watches the device running this service and publishes statistics.
     - `title` **string** — The readable title of the Component.
     - `description` **string** — The description of the Component.
     - `lynx_version` **string** — The Lynx protocol version used by the Component.  
-      `enum: A-01.01`
+      `enum: A2.0`
 - `config` **object** — Config covers the mutable configuration of the Component.
 - `status` **object** — Status covers the mutable status of the Component.
     - `state` **string** — The state of the Component.  
