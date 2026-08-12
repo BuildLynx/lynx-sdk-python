@@ -772,7 +772,7 @@ Published to `{componentId}/@/Notice` (QoS 1, not retained):
 {
   "action": "Stream",
   "severity": "WARNING",
-  "message": "Channel 'cpuLoad' already has an active command, ignoring stream start request.",
+  "message": "Channel 'cpuLoad' is already streaming, ignoring stream start request.",
   "data": {}
 }
 ```

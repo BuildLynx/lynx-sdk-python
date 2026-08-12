@@ -203,8 +203,9 @@ class Channel(Component):
         Handle a stream start request by starting a thread that calls the start stream function with a callback to queue the stream data.
          The start stream function should call the callback with each new piece of data to be published.
         """
-        if self._status.get("command") is not None:
-            self.service.logger.warning(f"Channel '{self.id}' already has an active command, ignoring stream start request.")
+        active = self._status.get("command")
+        if isinstance(active, dict) and active.get("command") == "Stream":
+            self.service.logger.warning(f"Channel '{self.id}' is already streaming, ignoring stream start request.")
             return
         
         payload = msg.payload
@@ -217,6 +218,7 @@ class Channel(Component):
         #TODO - validate the contents dict against the endpoint's schema before starting the stream
 
         self._exit_flag.clear()
+        self.set_status(command={"command": "Stream", "payload": msg.payload})
         payload_builder = PayloadBuilder(contents=contents, paginate=paginate, out_data_endpoint=self.out_data_endpoint, service=self.service)
         stream_thread = threading.Thread(target=self._stream_handler, kwargs={"request": msg, "payload_builder": payload_builder, "num_samples": num_samples})
         stream_thread.start()
@@ -226,7 +228,6 @@ class Channel(Component):
         """
         Handle a stream request.
         """
-        self.set_status(command={"command": "Stream", "payload": request.payload})
         samples_processed = 0
 
         def continue_sampling(default_interval: float = 1.0):
