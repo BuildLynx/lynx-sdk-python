@@ -1,4 +1,3 @@
-# Generative AI was used in the Creation/Modification of this file
 """
 Client Component base class for Lynx. A Client Component is a component that has its own MQTT client (like Service or Node).
 """
