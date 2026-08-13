@@ -58,8 +58,9 @@ class Endpoint:
         Args:
             topic: The full topic path of the endpoint. e.g. "Service/Channel/?/About"
             endpoint_direction: The direction of the endpoint (SUB, PUB, or PUBSUB)
-            component: The Component (Service or Channel) this endpoint belongs to
-            payload_schema: JSON schema for the payload. For PUB endpoints, this is what is sent.
+            logger: Logger for this endpoint,
+            mqtt_client: MqttClient for this endpoint,
+            payload_schema: JSON schema for the payload. For PUB endpoints, this is what is sent. For SUB endpoints, this is what is received.
                 For SUB endpoints, this is what is received.
                 e.g. {
                     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -289,7 +290,6 @@ class OutEndpoint(Endpoint):
             if not self.validate_payload(payload):
                 return
         
-        # Get Service to access MQTT client
         return self.mqtt_client.publish(
             topic=self.topic,
             payload=payload,

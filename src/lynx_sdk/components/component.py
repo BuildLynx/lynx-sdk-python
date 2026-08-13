@@ -21,7 +21,6 @@ from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
 from lynx_sdk.models.endpoint_args import REPLY_TOPIC_CLIENT_ABOUT
 
 if TYPE_CHECKING:
-    from lynx_sdk.components.service import Service
     from lynx_sdk.components.client_component import ClientComponent
 
 # -External Imports-
@@ -166,7 +165,7 @@ class Component(ABC):
         Create a new endpoint for this component from a dictionary of arguments.
         
         This is a convenience method that:
-        - Automatically passes component=self
+        - Automatically passes logger and mqtt_client to the endpoint
         - Constructs the full topic path from the component's ID
         - Adds the handler for InEndpoints
         - Resolves reply_topics sentinels for InEndpoints
@@ -203,9 +202,8 @@ class Component(ABC):
             endpoint_args["handler"] = sub_handler
             reply_topics = endpoint_args.get("reply_topics")
             if reply_topics is not None:
-                client_component = self.get_client_component()
                 endpoint_args["reply_topics"] = [
-                    client_component.sys_about_endpoint.topic
+                    client_component.sys_about_endpoint.topic # type: ignore
                     if t == REPLY_TOPIC_CLIENT_ABOUT else t
                     for t in reply_topics
                 ]
