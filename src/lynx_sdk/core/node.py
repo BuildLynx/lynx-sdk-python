@@ -13,19 +13,19 @@ from typing import Optional, Dict, Tuple
 import logging
 
 # -Lynx Imports-
-from lynx_sdk.components.client_component import ClientComponent
-from lynx_sdk.components.component import ComponentType
-from lynx_sdk.utils.structures import LYNX_VERSION
-from lynx_sdk.models.time_source import TimeSource
-from lynx_sdk.models.endpoint import InEndpoint, OutEndpoint
-from lynx_sdk.models.endpoint_args import \
+from lynx_sdk.core.client_component import ClientComponent
+from lynx_sdk.messaging.time_source import TimeSource
+from lynx_sdk.messaging.endpoint import InEndpoint, OutEndpoint
+from lynx_sdk.messaging.mqtt_client import InboundMessage
+from lynx_sdk.protocol.component_type import ComponentType
+from lynx_sdk.protocol.version import LYNX_VERSION
+from lynx_sdk.protocol.schemas import \
     GET_ABOUT_ENDPOINT_ARGS, \
     NODE_SYS_ABOUT_ENDPOINT_ARGS, \
     SYS_NOTICE_ENDPOINT_ARGS, \
     SUBSCRIBE_ABOUT_ENDPOINT_ARGS
-from lynx_sdk.models.notice import LoggingNoticeHandler
-from lynx_sdk.utils.mqtt_client import InboundMessage
-from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.protocol.contents import trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.runtime.notice_handler import LoggingNoticeHandler
 
 # -External Imports-
 

@@ -1,13 +1,15 @@
 """
 Service discovery — imports a user's Python module and resolves
 the Service instance for CLI introspection.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 import importlib.util
 import sys
 from pathlib import Path
 
-from lynx_sdk.components.service import Service
+from lynx_sdk import Service
 
 
 def load_service(target: str) -> Service:

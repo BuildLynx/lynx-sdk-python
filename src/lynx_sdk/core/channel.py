@@ -13,8 +13,9 @@ from __future__ import annotations
 from typing import Callable, Dict, Any, Iterable, Optional, Sequence, TYPE_CHECKING
 import threading
 
-from lynx_sdk.components.component import Component, ComponentType
-from lynx_sdk.models.endpoint import OutEndpoint
+from lynx_sdk.core.component import Component
+from lynx_sdk.messaging.endpoint import OutEndpoint
+from lynx_sdk.messaging.mqtt_client import InboundMessage
 from lynx_sdk.protocol.capabilities import (
     DISCOURAGED_ACTIONS,
     STREAM_FIELD_SAMPLE_INTERVAL,
@@ -25,19 +26,19 @@ from lynx_sdk.protocol.capabilities import (
     stop_command,
     validate_action_name,
 )
-from lynx_sdk.protocol.command_machine import CommandMachine
-from lynx_sdk.protocol.stream_batcher import (
+from lynx_sdk.protocol.component_type import ComponentType
+from lynx_sdk.protocol.contents import trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.protocol.version import LYNX_VERSION
+from lynx_sdk.runtime.command_machine import CommandMachine
+from lynx_sdk.runtime.stream_batcher import (
     StreamBatcher,
     DEFAULT_NUM_SAMPLES,
     DEFAULT_SAMPLE_INTERVAL,
     resolve_batch_limits,
 )
-from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
-from lynx_sdk.utils.mqtt_client import InboundMessage
-from lynx_sdk.utils.structures import LYNX_VERSION
 
 if TYPE_CHECKING:
-    from lynx_sdk.components.service import Service
+    from lynx_sdk.core.service import Service
 
 
 class Channel(Component):

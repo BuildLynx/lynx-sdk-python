@@ -3,77 +3,30 @@ Client Component base class for Lynx. A Client Component is a component that has
 
 Generative AI was used in the Creation/Modification of this file.
 
-Broker resolution, logger construction, MQTT lifecycle, and the serve loop are
-runtime concerns kept here rather than in Component. start(loop="thread") runs
-paho's network thread and a deadline loop; start(loop="pumped") connects and
-returns so the application can call pump().
+Broker resolution and logger construction live in lynx_sdk.runtime. MQTT
+lifecycle and the serve loop are kept here rather than in Component.
+start(loop="thread") runs paho's network thread and a deadline loop;
+start(loop="pumped") connects and returns so the application can call pump().
 """
 
-import json
 import logging
-import os
 from typing import Dict, Any, Optional, Tuple
-from pathlib import Path
 import time
-import sys
 
-from lynx_sdk.components.component import Component, ComponentType
-from lynx_sdk.utils.mqtt_client import MqttClient
-from lynx_sdk.models.time_source import TimeSource, instantiate_ideal_time_source
-from lynx_sdk.models.network_state import NetworkState
+from lynx_sdk.core.component import Component
+from lynx_sdk.messaging.mqtt_client import MqttClient
+from lynx_sdk.messaging.time_source import TimeSource, instantiate_ideal_time_source
+from lynx_sdk.protocol.component_type import ComponentType
+from lynx_sdk.runtime.broker_config import resolve_broker_socket
+from lynx_sdk.runtime.logging_setup import configure_logger
+from lynx_sdk.runtime.network_state import NetworkState
 
 import paho.mqtt.client as mqtt
 
 
 CONNECT_RETRY_INTERVAL: int = 5
 KEEPALIVE_INTERVAL: int = 60
-_CONF_FILENAME = "lynxConf.json"
 DEADLINE_SLEEP_CAP_S: float = 0.1
-
-
-def resolve_broker_socket() -> Tuple[str, int]:
-    """
-    Resolve the MQTT broker (host, port) using the following priority:
-      1. UPSTREAM_NODE_HOST / UPSTREAM_NODE_PORT environment variables
-      2. UpstreamNodeHost / UpstreamNodePort from lynxConf.json (searched in cwd)
-      3. ("localhost", 1883)
-    """
-    env_host = os.environ.get("UPSTREAM_NODE_HOST")
-    if env_host is not None:
-        port = int(os.environ.get("UPSTREAM_NODE_PORT", "1883"))
-        return (env_host, port)
-
-    conf_path = Path.cwd() / _CONF_FILENAME
-    if conf_path.is_file():
-        try:
-            with open(conf_path, "r") as f:
-                data = json.load(f)
-            host = data.get("UpstreamNodeHost")
-            if host is not None:
-                port = int(data.get("UpstreamNodePort", 1883))
-                return (host, port)
-        except (json.JSONDecodeError, ValueError, OSError):
-            pass
-
-    return ("localhost", 1883)
-
-
-def _resolve_broker_socket() -> Tuple[str, int]:
-    """Backward-compatible alias."""
-    return resolve_broker_socket()
-
-
-def configure_logger(component_id: str, logger: Optional[logging.Logger] = None) -> logging.Logger:
-    """Return the given logger, or a stdout DEBUG logger named after the component."""
-    if logger is not None:
-        return logger
-    configured = logging.getLogger(component_id)
-    configured.setLevel(level=logging.DEBUG)
-    stream_handler = logging.StreamHandler(stream=sys.stdout)
-    stream_handler.setLevel(level=logging.DEBUG)
-    configured.addHandler(stream_handler)
-    configured.propagate = False
-    return configured
 
 
 class ClientComponent(Component):

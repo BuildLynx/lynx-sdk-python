@@ -1,5 +1,7 @@
 """
 A class to represent the current state of the network as known by a ClientComponent.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 
@@ -10,9 +12,9 @@ A class to represent the current state of the network as known by a ClientCompon
 from typing import Dict, Any, List, Tuple, FrozenSet
 
 # -Lynx Imports-
-from lynx_sdk.utils.mqtt_client import InboundMessage
-from lynx_sdk.utils.datastructures import deep_merge
-from lynx_sdk.components.component import ComponentType
+from lynx_sdk.messaging.mqtt_client import InboundMessage
+from lynx_sdk.protocol.dicts import deep_merge
+from lynx_sdk.protocol.component_type import ComponentType
 
 # -External Imports-
 

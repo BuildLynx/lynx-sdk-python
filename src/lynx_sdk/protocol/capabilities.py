@@ -11,7 +11,7 @@ construction; after the first About publish the set is frozen.
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
-from lynx_sdk.models.endpoint_args import (
+from lynx_sdk.protocol.schemas import (
     CHANNEL_CMD_POLL_ENDPOINT_ARGS,
     CHANNEL_CMD_STOP_ENDPOINT_ARGS,
     CONTENTS_PROPERTY,

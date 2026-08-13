@@ -492,7 +492,7 @@ When a Service (or Node) starts, it resolves the broker address in this priority
 ### 6.5 Python SDK Example
 
 ```python
-from lynx_sdk.components.service import Service
+from lynx_sdk import Service
 
 service = Service(
     id="deviceWatcher",
@@ -959,7 +959,7 @@ Each Node maintains a **NetworkState** -- a hierarchical in-memory model of the 
 ### 8.4 Python SDK Example
 
 ```python
-from lynx_sdk.components.node import Node
+from lynx_sdk import Node
 
 node = Node(
     id="exampleNode",

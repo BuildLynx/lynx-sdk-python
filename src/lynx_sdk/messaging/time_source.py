@@ -1,6 +1,8 @@
 """
 TimeSource class for Lynx. A TimeSource is the encapsulation of a single time source, it contains a function to get 
     the current time in seconds and nanoseconds according to the time source.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 

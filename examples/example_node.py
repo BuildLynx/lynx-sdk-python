@@ -1,4 +1,10 @@
-from lynx_sdk.components.node import Node
+"""
+Example Node for Lynx.
+
+Generative AI was used in the Creation/Modification of this file.
+"""
+
+from lynx_sdk import Node
 
 node = Node(
     id="exampleNode",

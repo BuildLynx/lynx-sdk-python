@@ -12,21 +12,15 @@ and of Channel's parent Service.
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Type, Callable, Any
-from enum import Enum
 from copy import copy
 from logging import Logger
 
-from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
-from lynx_sdk.models.endpoint_args import REPLY_TOPIC_CLIENT_ABOUT
+from lynx_sdk.messaging.endpoint import Endpoint, InEndpoint, OutEndpoint
+from lynx_sdk.messaging.mqtt_client import MqttClient
+from lynx_sdk.protocol.schemas import REPLY_TOPIC_CLIENT_ABOUT
 from lynx_sdk.protocol.topics import about_topic, build_topic
 from lynx_sdk.protocol.capabilities import InterfaceFrozenError
-from lynx_sdk.utils.mqtt_client import MqttClient
-
-
-class ComponentType(Enum):
-    NODE = "Node"
-    SERVICE = "Service"
-    CHANNEL = "Channel"
+from lynx_sdk.protocol.component_type import ComponentType
 
 
 class Component(ABC):

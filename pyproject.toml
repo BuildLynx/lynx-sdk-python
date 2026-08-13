@@ -1,3 +1,5 @@
+# Generative AI was used in the Creation/Modification of this file.
+
 [project]
 name = "lynx-sdk"
 version = "00.01.01"
@@ -24,9 +26,29 @@ cli = [
 testing = [
     "pytest-sugar",
 ]
+dev = [
+    "import-linter",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 lynx_sdk = ["cli/docker/templates/*.j2"]
 
 [project.scripts]
 lynx = "lynx_sdk.cli.main:app"
+
+[tool.importlinter]
+root_package = "lynx_sdk"
+
+[[tool.importlinter.contracts]]
+name = "Lynx layers"
+type = "layers"
+layers = [
+    "lynx_sdk.cli",
+    "lynx_sdk.core",
+    "lynx_sdk.runtime",
+    "lynx_sdk.messaging",
+    "lynx_sdk.protocol",
+]

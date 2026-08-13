@@ -5,7 +5,7 @@ Watches the device running this service and publishes statistics.
 | Property | Value |
 |----------|-------|
 | ID | `deviceWatcher` |
-| Lynx Version | A2.0 |
+| Lynx Version | A2.1 |
 | Time Source | unix |
 
 ---
@@ -26,9 +26,9 @@ Watches the device running this service and publishes statistics.
     - `title` **string** — The readable title of the Component.
     - `description` **string** — The description of the Component.
     - `lynx_version` **string** — The Lynx protocol version used by the Component.  
-      `enum: A2.0`
+      `enum: A2.1`
 - `config` **object** — Config covers the mutable configuration of the Component.
-- `status` **object** — Status covers the mutable status of the Component.
+- `status` **object** — Status covers the mutable status of the Component. Shape varies by component type.
     - `connected` **boolean** — Whether the Service is connected to the Lynx network.
 - `endpoints` **object** — Object representing all the endpoints of the Component.
 - `channels` **object** — Object representing all the channels of the Component.
@@ -76,7 +76,7 @@ Polls the CPU load
 <details markdown="1">
 <summary><code>deviceWatcher/cpuLoad/!/Poll</code> — sub</summary>
 
-> Start polling at a set time interval on the channel for data.
+> Produce one sample immediately.
 
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
@@ -93,12 +93,15 @@ Polls the CPU load
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
   `default: True`
-- `interval` **number** — Seconds between samples  
+- `sampleInterval` **number** — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.  
   `default: 1.0` `minimum: 0`
-- `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
+- `numSamples` **integer** — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.  
   `default: 0` `minimum: 0`
-- `paginate` **integer** — 0 for no pagination (all data in one payload), positive int for page size, default 1  
-  `default: 1` `minimum: 0`
+- `batch` **object** — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.
+    - `maxInterval` **number** — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).  
+      `default: 300` `minimum: 0`
+    - `maxSamples` **integer** — Max samples per published message. 0 = no count limit.  
+      `default: 1` `minimum: 0`
 
 </details>
 
@@ -106,7 +109,7 @@ Polls the CPU load
 <details markdown="1">
 <summary><code>deviceWatcher/cpuLoad/!/Stop</code> — sub</summary>
 
-> Stop polling or streaming on the channel.
+> Stop the active command on the channel.
 
 
 *Empty payload*
@@ -117,15 +120,15 @@ Polls the CPU load
 <details markdown="1">
 <summary><code>deviceWatcher/cpuLoad/<</code> — pub</summary>
 
-> Output data from the channel.
+> Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.
 
 
 - `[]` **array**
-    - `s` **integer** — Seconds since the start of the channel
-    - `ns` **integer** — Nanoseconds since the start of the channel
+    - `s` **integer** — Seconds since the start of the current stream
+    - `ns` **integer** — Nanoseconds remainder since the start of the current stream
     - `data` **object** — The data from the channel
         - `load` **number**  
-          `unit: %`
+          `minimum: 0` `maximum: 100` `unit: %`
 
 </details>
 
@@ -139,7 +142,7 @@ RAM status of the system
 <details markdown="1">
 <summary><code>deviceWatcher/memory/!/Poll</code> — sub</summary>
 
-> Start polling at a set time interval on the channel for data.
+> Produce one sample immediately.
 
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
@@ -156,12 +159,15 @@ RAM status of the system
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
   `default: True`
-- `interval` **number** — Seconds between samples  
+- `sampleInterval` **number** — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.  
   `default: 1.0` `minimum: 0`
-- `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
+- `numSamples` **integer** — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.  
   `default: 0` `minimum: 0`
-- `paginate` **integer** — 0 for no pagination (all data in one payload), positive int for page size, default 1  
-  `default: 1` `minimum: 0`
+- `batch` **object** — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.
+    - `maxInterval` **number** — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).  
+      `default: 300` `minimum: 0`
+    - `maxSamples` **integer** — Max samples per published message. 0 = no count limit.  
+      `default: 1` `minimum: 0`
 
 </details>
 
@@ -169,7 +175,7 @@ RAM status of the system
 <details markdown="1">
 <summary><code>deviceWatcher/memory/!/Stop</code> — sub</summary>
 
-> Stop polling or streaming on the channel.
+> Stop the active command on the channel.
 
 
 *Empty payload*
@@ -180,21 +186,21 @@ RAM status of the system
 <details markdown="1">
 <summary><code>deviceWatcher/memory/<</code> — pub</summary>
 
-> Output data from the channel.
+> Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.
 
 
 - `[]` **array**
-    - `s` **integer** — Seconds since the start of the channel
-    - `ns` **integer** — Nanoseconds since the start of the channel
+    - `s` **integer** — Seconds since the start of the current stream
+    - `ns` **integer** — Nanoseconds remainder since the start of the current stream
     - `data` **object** — The data from the channel
         - `total` **integer** — Total amount of RAM in bytes  
-          `unit: bytes`
+          `minimum: 0` `unit: bytes`
         - `used` **integer** — Used amount of RAM in bytes  
-          `unit: bytes`
+          `minimum: 0` `unit: bytes`
         - `free` **integer** — Free amount of RAM in bytes  
-          `unit: bytes`
+          `minimum: 0` `unit: bytes`
         - `percent` **number** — Percentage of RAM used  
-          `unit: %`
+          `minimum: 0` `maximum: 100` `unit: %`
 
 </details>
 
@@ -202,19 +208,7 @@ RAM status of the system
 
 ### Second Alert
 
-Emit the time every time the second changes
-
-
-<details markdown="1">
-<summary><code>deviceWatcher/secondAlert/!/Poll</code> — sub</summary>
-
-> Start polling at a set time interval on the channel for data.
-
-
-- `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
-  `default: True`
-
-</details>
+Simulated alert: emits once per wall-clock second.
 
 
 <details markdown="1">
@@ -225,12 +219,13 @@ Emit the time every time the second changes
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
   `default: True`
-- `interval` **number** — Seconds between samples  
-  `default: 1.0` `minimum: 0`
-- `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
+- `numSamples` **integer** — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.  
   `default: 0` `minimum: 0`
-- `paginate` **integer** — 0 for no pagination (all data in one payload), positive int for page size, default 1  
-  `default: 1` `minimum: 0`
+- `batch` **object** — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.
+    - `maxInterval` **number** — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).  
+      `default: 300` `minimum: 0`
+    - `maxSamples` **integer** — Max samples per published message. 0 = no count limit.  
+      `default: 1` `minimum: 0`
 
 </details>
 
@@ -238,7 +233,7 @@ Emit the time every time the second changes
 <details markdown="1">
 <summary><code>deviceWatcher/secondAlert/!/Stop</code> — sub</summary>
 
-> Stop polling or streaming on the channel.
+> Stop the active command on the channel.
 
 
 *Empty payload*
@@ -249,12 +244,12 @@ Emit the time every time the second changes
 <details markdown="1">
 <summary><code>deviceWatcher/secondAlert/<</code> — pub</summary>
 
-> Output data from the channel.
+> Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.
 
 
 - `[]` **array**
-    - `s` **integer** — Seconds since the start of the channel
-    - `ns` **integer** — Nanoseconds since the start of the channel
+    - `s` **integer** — Seconds since the start of the current stream
+    - `ns` **integer** — Nanoseconds remainder since the start of the current stream
     - `data` **object** — The data from the channel
         - `second` **integer** — The second of the minute  
           `unit: seconds`
@@ -274,7 +269,7 @@ Emit a random integer between 1 and 3
 <details markdown="1">
 <summary><code>deviceWatcher/random/!/Poll</code> — sub</summary>
 
-> Start polling at a set time interval on the channel for data.
+> Produce one sample immediately.
 
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
@@ -291,12 +286,15 @@ Emit a random integer between 1 and 3
 
 - `contents` **object | boolean** — Omit or true for the full payload. An empty object {} selects no keys.  
   `default: True`
-- `interval` **number** — Seconds between samples  
+- `sampleInterval` **number** — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.  
   `default: 1.0` `minimum: 0`
-- `numSamples` **integer** — 1 for single, 0 for infinite, positive int for numbered, default 0  
+- `numSamples` **integer** — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.  
   `default: 0` `minimum: 0`
-- `paginate` **integer** — 0 for no pagination (all data in one payload), positive int for page size, default 1  
-  `default: 1` `minimum: 0`
+- `batch` **object** — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.
+    - `maxInterval` **number** — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).  
+      `default: 300` `minimum: 0`
+    - `maxSamples` **integer** — Max samples per published message. 0 = no count limit.  
+      `default: 1` `minimum: 0`
 
 </details>
 
@@ -304,7 +302,7 @@ Emit a random integer between 1 and 3
 <details markdown="1">
 <summary><code>deviceWatcher/random/!/Stop</code> — sub</summary>
 
-> Stop polling or streaming on the channel.
+> Stop the active command on the channel.
 
 
 *Empty payload*
@@ -315,12 +313,12 @@ Emit a random integer between 1 and 3
 <details markdown="1">
 <summary><code>deviceWatcher/random/<</code> — pub</summary>
 
-> Output data from the channel.
+> Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.
 
 
 - `[]` **array**
-    - `s` **integer** — Seconds since the start of the channel
-    - `ns` **integer** — Nanoseconds since the start of the channel
+    - `s` **integer** — Seconds since the start of the current stream
+    - `ns` **integer** — Nanoseconds remainder since the start of the current stream
     - `data` **object** — The data from the channel
         - `number` **number** — A random integer between 1 and 3
 

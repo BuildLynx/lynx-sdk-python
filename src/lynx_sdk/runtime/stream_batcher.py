@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 
-from lynx_sdk.utils.json_tools import trim_payload_by_contents, PayloadBuildingError
+from lynx_sdk.protocol.contents import trim_payload_by_contents, PayloadBuildingError
 
 
 DEFAULT_SAMPLE_INTERVAL = 1.0

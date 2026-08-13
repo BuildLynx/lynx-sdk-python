@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Any, Dict, List
 from logging import Logger
 
-from lynx_sdk.utils.mqtt_client import MqttClient, InboundMessage
+from lynx_sdk.messaging.mqtt_client import MqttClient, InboundMessage
 from lynx_sdk.protocol.endpoint_spec import EndpointSpec, LynxEndpointDirection
 
 import paho.mqtt.client as mqtt

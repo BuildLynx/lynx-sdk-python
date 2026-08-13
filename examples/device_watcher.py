@@ -5,9 +5,7 @@ Generative AI was used in the Creation/Modification of this file.
 """
 
 from typing import Callable
-from lynx_sdk.components.channel import Channel
-from lynx_sdk.components.service import Service
-from lynx_sdk.utils.mqtt_client import InboundMessage
+from lynx_sdk import Channel, InboundMessage, Service
 
 import math
 import psutil

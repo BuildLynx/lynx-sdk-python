@@ -11,7 +11,7 @@ the same schema (A2.1 section 4.6) without depending on a broker.
 from enum import Enum
 from typing import Dict, List, Optional
 
-from lynx_sdk.utils.json_tools import normalize_payload_schema, validate_json_object
+from lynx_sdk.protocol.schema_tools import normalize_payload_schema, validate_json_object
 
 
 class LynxEndpointDirection(Enum):
