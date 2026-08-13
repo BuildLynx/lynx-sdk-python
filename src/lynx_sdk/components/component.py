@@ -181,7 +181,9 @@ class Component(ABC):
             The created endpoint instance
         """
         endpoint_args = endpoint_args.copy()
-        endpoint_args["component"] = self
+        client_component = self.get_client_component()
+        endpoint_args["logger"] = client_component.logger
+        endpoint_args["mqtt_client"] = client_component.mqtt_client
         
         # Construct full topic path
         # Service endpoints: "service_id/?/About"
@@ -189,8 +191,7 @@ class Component(ABC):
         if endpoint_args.pop("skip_topic_prefixes", False):
             endpoint_args["topic"] = endpoint_args['topic']
         elif self.component_type == ComponentType.CHANNEL:
-            service: Service = self.get_client_component()
-            endpoint_args["topic"] = f"{service.id}/{self.id}/{endpoint_args['topic']}"
+            endpoint_args["topic"] = f"{client_component.id}/{self.id}/{endpoint_args['topic']}"
         elif self.component_type == ComponentType.SERVICE:
             endpoint_args["topic"] = f"{self.id}/{endpoint_args['topic']}"
         elif self.component_type == ComponentType.NODE:

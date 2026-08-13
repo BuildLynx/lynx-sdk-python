@@ -8,14 +8,12 @@ This module provides an endpoint for Lynx.
 
 # -stdlib Imports-
 from __future__ import annotations
-from typing import Callable, Optional, Any, Dict, List, TYPE_CHECKING
+from typing import Callable, Optional, Any, Dict, List
 from enum import Enum
-
+from logging import Logger
 from lynx_sdk.utils.mqtt_client import MqttClient, InboundMessage
 
 # -Lynx Imports-
-if TYPE_CHECKING:
-    from lynx_sdk.components.component import Component
 from lynx_sdk.utils.json_tools import validate_json_object
 
 # -External Imports-
@@ -49,8 +47,9 @@ class Endpoint:
     def __init__(self,
         topic: str,
         endpoint_direction: LynxEndpointDirection,
-        component: Component,
         payload_schema: object,
+        logger: Logger,
+        mqtt_client: MqttClient,
         payload_schema_additional_properties: bool = False,
         description: str = ""):
         """
@@ -80,8 +79,9 @@ class Endpoint:
         """
         self.topic: str = topic
         self.endpoint_direction: LynxEndpointDirection = endpoint_direction
-        self.component: Component = component
         self.payload_schema: object = payload_schema
+        self.logger: Logger = logger
+        self.mqtt_client: MqttClient = mqtt_client
         self.payload_schema_additional_properties: bool = payload_schema_additional_properties
         self.description: str = description
 
@@ -90,12 +90,11 @@ class Endpoint:
         """
         Validate a payload dictionary against a JSON schema.
         """
-        client_component = self.component.get_client_component()
         try:
             validate_json_object(payload_dict, self.payload_schema, additional_properties=self.payload_schema_additional_properties)
             return True
         except jsonschema.exceptions.ValidationError as e:
-            client_component.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
+            self.logger.warning(f"Payload validation failed for endpoint '{self.topic}': {e.message}")
             return False
             
     
@@ -120,7 +119,8 @@ class InEndpoint(Endpoint):
     def __init__(self,
         topic: str,
         handler: Callable[[InboundMessage], Optional[Any]],
-        component: Component,
+        logger: Logger,
+        mqtt_client: MqttClient,
         payload_schema: object,
         description: str = "",
         payload_schema_additional_properties: bool = False,
@@ -144,14 +144,15 @@ class InEndpoint(Endpoint):
         super().__init__(
             topic=topic, 
             endpoint_direction=LynxEndpointDirection.SUB,
-            component=component,
+            logger=logger,
+            mqtt_client=mqtt_client,
             payload_schema=payload_schema, 
             description=description,
             payload_schema_additional_properties=payload_schema_additional_properties)
         self.handler: Callable[[InboundMessage], Optional[Any]] = handler
         self.reply_topics: Optional[List[str]] = reply_topics
         self.data_output: Optional[bool] = data_output
-        self.component.get_client_component().mqtt_client.add_callback(topic=self.topic, callback=self.callback)
+        self.mqtt_client.add_callback(topic=self.topic, callback=self.callback)
 
 
     def callback(self, mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
@@ -176,9 +177,8 @@ class InEndpoint(Endpoint):
             ValueError: If the payload cannot be parsed as JSON
             ValueError: If the payload fails schema validation (when schema exists)
         """
-        client_component = self.component.get_client_component()
         try:
-            client_component.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
+            self.logger.debug(f"Handling payload for endpoint '{self.topic}': {message.payload}")
             
             stripped_payload = message.payload.strip()
 
@@ -188,7 +188,7 @@ class InEndpoint(Endpoint):
             try:
                 payload: Dict = orjson.loads(stripped_payload)
             except orjson.JSONDecodeError as e:
-                client_component.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
+                self.logger.error(f"Failed to parse JSON payload for endpoint '{self.topic}': {e}")
                 raise ValueError(f"Invalid JSON payload: {e}") from e
             
             # Validate payload against schema if schema exists
@@ -202,12 +202,12 @@ class InEndpoint(Endpoint):
                 incoming_message = MqttClient.from_paho_message(message=message, payload=payload)
                 return self.handler(incoming_message)
             except Exception as e:
-                client_component.logger.exception(
+                self.logger.exception(
                     f"Handler exception for endpoint '{self.topic}': "
                     f"{type(e).__name__}: {str(e)}"
                 )
         except Exception as e:
-            client_component.logger.exception(
+            self.logger.exception(
                 f"Error in callback for endpoint '{self.topic}': "
                 f"{type(e).__name__}: {str(e)}"
             )
@@ -232,7 +232,8 @@ class InEndpoint(Endpoint):
 class OutEndpoint(Endpoint):
     def __init__(self,
         topic: str,
-        component: Component,
+        logger: Logger,
+        mqtt_client: MqttClient,
         payload_schema: object,
         description: str = "",
         default_qos: int = 0,
@@ -252,7 +253,8 @@ class OutEndpoint(Endpoint):
         super().__init__(
             topic=topic, 
             endpoint_direction=LynxEndpointDirection.PUB,
-            component=component,
+            logger=logger,
+            mqtt_client=mqtt_client,
             payload_schema=payload_schema, 
             description=description,
             payload_schema_additional_properties=payload_schema_additional_properties)
@@ -288,8 +290,7 @@ class OutEndpoint(Endpoint):
                 return
         
         # Get Service to access MQTT client
-        client_component = self.component.get_client_component()
-        return client_component.mqtt_client.publish(
+        return self.mqtt_client.publish(
             topic=self.topic,
             payload=payload,
             qos=qos,
