@@ -1,5 +1,7 @@
 """
 Node class for Lynx. A Node is an extension of an MQTT broker that tracks state of connected services and can forward messages to a parent node.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 
@@ -129,13 +131,7 @@ class Node(ClientComponent):
         Publish the about information of the node.
         """
         self.sys_about_endpoint.publish(payload=self.produce_about())
-    
 
-    def get_client_component(self) -> ClientComponent:
-        """
-        Get the Node (returns self since this IS the Node).
-        """
-        return self
 
 # === MAIN LOOP ===
 

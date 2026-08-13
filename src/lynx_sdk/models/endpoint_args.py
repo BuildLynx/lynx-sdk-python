@@ -1,25 +1,39 @@
 """
 This module provides the arguments for the endpoints for components including Component and Channel.
+
+Generative AI was used in the Creation/Modification of this file.
+
+Schemas here are declared as `payload_properties` (a bare map of property name to
+subschema) or `payload_schema` (a complete Draft-7 schema carrying a "type"). Endpoint
+normalizes whichever is given into canonical form once, at construction. The two are
+separate keys rather than one key whose shape is inferred, because a properties map may
+legitimately contain a property named "type".
 """
+
+from typing import Dict, Optional
 
 from lynx_sdk.utils.structures import LYNX_VERSION
 from lynx_sdk.utils.datastructures import deep_merge
+from lynx_sdk.utils.json_tools import SchemaDefinitionError
 from lynx_sdk.models.notice import NoticeSeverity
 
 REPLY_TOPIC_CLIENT_ABOUT = "__CLIENT_ABOUT__"
+
+# -Shared property fragments-
+CONTENTS_PROPERTY = {
+    "title": "contents Object",
+    "description": "Omit or true for the full payload. An empty object {} selects no keys.",
+    "default": True,
+    "type": ["object", "boolean"]
+}
 
 # -Component Endpoints-
 GET_ABOUT_ENDPOINT_ARGS = {
     "topic": "?/About",
     "description": "Query information about the Component.",
     "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
-    "payload_schema": {
-        "contents": {
-            "title": "contents Object",
-            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
-            "default": True,
-            "type": ["object", "boolean"]
-        }
+    "payload_properties": {
+        "contents": CONTENTS_PROPERTY
     }
 }
 
@@ -28,7 +42,7 @@ SYS_ABOUT_ENDPOINT_ARGS = {
     "description": "Publish information about the Component.",
     "default_qos": 1,
     "default_retain": True,
-    "payload_schema": {
+    "payload_properties": {
         "lynxType": {
             "title": "Lynx Component Type",
             "description": "The type of the Lynx Component.",
@@ -86,7 +100,7 @@ SYS_NOTICE_ENDPOINT_ARGS = {
     "description": "Publish a notice about the Component.",
     "default_qos": 1,
     "default_retain": False,
-    "payload_schema": {
+    "payload_properties": {
         "action": {
             "title": "Action",
             "description": "The command or query in execution when the notice was published. " \
@@ -119,7 +133,7 @@ SYS_NOTICE_ENDPOINT_ARGS = {
 
 # -Node Endpoints-
 NODE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
-    "payload_schema": {
+    "payload_properties": {
         "services": {
             "title": "Services",
             "description": "Object representing all the services of the Node.",
@@ -146,13 +160,15 @@ SUBSCRIBE_ABOUT_ENDPOINT_ARGS = {
     "skip_topic_prefixes": True,
     "topic": "+/@/About",
     "description": "Monitor about messages from child nodes and services.",
-    "payload_schema_additional_properties": True,
-    "payload_schema": SYS_ABOUT_ENDPOINT_ARGS["payload_schema"]
+    # Incoming About payloads come from other components, whose Lynx version and
+    # extensions this component does not control, so unrecognized keys are accepted.
+    "additional_properties": True,
+    "payload_properties": SYS_ABOUT_ENDPOINT_ARGS["payload_properties"]
 }
 
 # -Service Endpoints-
 SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
-    "payload_schema": {
+    "payload_properties": {
         "channels": {
             "title": "Channels",
             "description": "Object representing all the channels of the Component.",
@@ -207,16 +223,11 @@ SERVICE_SYS_ABOUT_ENDPOINT_ARGS = deep_merge(SYS_ABOUT_ENDPOINT_ARGS, {
 # -Channel Endpoints-
 CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     "topic": "!/Poll",
-    "description": "Start polling at a set time interval on the channel for data.",
+    "description": "Produce one sample immediately.",
     "reply_topics": [],
     "data_output": True,
-    "payload_schema": {
-        "contents": {
-            "title": "Values to contents",
-            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
-            "default": True,
-            "type": ["object", "boolean"]
-        }
+    "payload_properties": {
+        "contents": CONTENTS_PROPERTY
     }
 }
 
@@ -225,23 +236,18 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
     "description": "Start streaming on the channel, emitting data when available.",
     "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
     "data_output": True,
-    "payload_schema": {
-        "contents": {
-            "title": "Values to contents",
-            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
-            "default": True,
-            "type": ["object", "boolean"]
-        },
+    "payload_properties": {
+        "contents": CONTENTS_PROPERTY,
         "sampleInterval": {
             "title": "Sample Interval",
-            "description": "Requested seconds between samples. 0 = as fast as the generator allows.",
+            "description": "Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.",
             "default": 1.0,
             "type": "number",
             "minimum": 0
         },
         "numSamples": {
             "title": "Number of Samples",
-            "description": "Total samples to admit into batches. 0 = infinite. Counts only yields that enter the batch after contents filtering.",
+            "description": "Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.",
             "default": 0,
             "type": "integer",
             "minimum": 0
@@ -273,40 +279,101 @@ CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
 
 CHANNEL_CMD_STOP_ENDPOINT_ARGS = {
     "topic": "!/Stop",
-    "description": "Stop polling or streaming on the channel.",
+    "description": "Stop the active command on the channel.",
     "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
     "data_output": False,
-    "payload_schema": {}
+    # An empty properties map with additionalProperties false accepts only {}. Publishing
+    # a bare {} as the schema would advertise the opposite: accept anything.
+    "payload_properties": {}
 }
 
-CHANNEL_OUT_DATA_ENDPOINT_ARGS = {
-    "topic": "<",
-    "description": "Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.",
-    "default_qos": 0,
-    "default_retain": False,
-    "payload_schema": {
+SAMPLE_TIMESTAMP_PROPERTIES = {
+    "s": {
+        "title": "Seconds",
+        "description": "Seconds since the start of the current stream",
+        "type": "integer"
+    },
+    "ns": {
+        "title": "Nanoseconds",
+        "description": "Nanoseconds remainder since the start of the current stream",
+        "type": "integer"
+    }
+}
+
+
+def build_channel_data_schema(output_data_properties: Optional[Dict] = None) -> Dict:
+    """
+    Build the `<` payload schema for a channel: an array of timestamped samples whose
+    `data` shape is the channel's own.
+
+    The schema is composed from fragments rather than produced by copying a template and
+    assigning into a nested path. Deep-path assignment silently accepted a complete schema
+    where a properties map was expected, producing a `data` subschema with properties
+    named "type" and "properties".
+
+    Args:
+        output_data_properties: Map of property name to subschema for the channel's data,
+            or None when the channel does not declare its data shape.
+
+    Returns:
+        A complete Draft-7 array schema.
+    """
+    if output_data_properties is None:
+        # Shape undeclared: accept any object rather than only the empty object.
+        data_schema = {
+            "title": "Data",
+            "description": "The data from the channel. Shape not declared by this channel.",
+            "type": "object"
+        }
+    else:
+        non_schema_keys = [
+            name for name, subschema in output_data_properties.items()
+            if not isinstance(subschema, (dict, bool))
+        ]
+        if non_schema_keys:
+            raise SchemaDefinitionError(
+                f"output_data_schema is a map of property name to subschema, but "
+                f"{non_schema_keys} map to values that are not subschemas. "
+                f"Pass {{\"load\": {{\"type\": \"number\"}}}}, not "
+                f"{{\"type\": \"object\", \"properties\": {{...}}}}."
+            )
+        data_schema = {
+            "title": "Data",
+            "description": "The data from the channel",
+            "type": "object",
+            "properties": output_data_properties,
+            "additionalProperties": False
+        }
+
+    return {
         "type": "array",
         "items": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "s": {
-                    "title": "Seconds",
-                    "description": "Seconds since the start of the channel",
-                    "type": "integer"
-                },
-                "ns": {
-                    "title": "Nanoseconds",
-                    "description": "Nanoseconds since the start of the channel",
-                    "type": "integer"
-                },
-                "data": {
-                    "title": "Data",
-                    "description": "The data from the channel",
-                    "type": "object",
-                    "properties": {}
-                }
+                **SAMPLE_TIMESTAMP_PROPERTIES,
+                "data": data_schema
             }
         }
     }
-}
+
+
+def build_channel_out_data_endpoint_args(output_data_properties: Optional[Dict] = None) -> Dict:
+    """
+    Build the full `<` endpoint args for a channel.
+
+    Args:
+        output_data_properties: The channel's data properties map, or None.
+
+    Returns:
+        Endpoint args suitable for Component.new_out_endpoint.
+    """
+    return {
+        "topic": "<",
+        "description": "Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.",
+        "default_qos": 0,
+        "default_retain": False,
+        # A complete schema rather than a properties map: the payload is an array, so it
+        # cannot be expressed as a map of object properties.
+        "payload_schema": build_channel_data_schema(output_data_properties)
+    }

@@ -2,43 +2,26 @@
 Component base class for Lynx. A Component is any entity that has identity, endpoints, and can produce info about itself.
 Both Service and Channel inherit from Component.
 
-Note: Service owns the MQTT client, time_source, and logger. Channels access these through their parent Service.
+Generative AI was used in the Creation/Modification of this file.
+
+This class holds identity, endpoint registry, and status. It does not own an
+MQTT client or publish About: those are runtime concerns of ClientComponent
+and of Channel's parent Service.
 """
 
-
-
-# === IMPORTS ===
-
-# -stdlib Imports-
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, Callable, Any, TYPE_CHECKING
+from typing import Dict, Optional, Type, Callable, Any
 from enum import Enum
 from copy import copy
+from logging import Logger
 
-# -Lynx Imports-
 from lynx_sdk.models.endpoint import Endpoint, InEndpoint, OutEndpoint
 from lynx_sdk.models.endpoint_args import REPLY_TOPIC_CLIENT_ABOUT
+from lynx_sdk.protocol.topics import about_topic, build_topic
+from lynx_sdk.protocol.capabilities import InterfaceFrozenError
+from lynx_sdk.utils.mqtt_client import MqttClient
 
-if TYPE_CHECKING:
-    from lynx_sdk.components.client_component import ClientComponent
-
-# -External Imports-
-
-
-# === CONSTANTS ===
-
-
-
-# === GLOBALS VARIABLES ===
-
-
-
-# === FUNCTIONS ===
-
-
-
-#  === CLASSES ===
 
 class ComponentType(Enum):
     NODE = "Node"
@@ -49,182 +32,144 @@ class ComponentType(Enum):
 class Component(ABC):
     """
     Base class for Lynx components (Service, Channel, etc).
-    
+
     A Component represents any entity in Lynx that:
     - Has identity (id, title, description, version)
-    - Has endpoints for communication  
+    - Has endpoints for communication
     - Can produce an "about" description of itself
     - Can track status (shape varies by component type)
-    
-    Note: MQTT client, time_source, and logger are owned by Service only.
-    Channels access these resources through their parent Service reference.
-    
-    This is an abstract base class and cannot be instantiated directly.
-    Use Service or Channel instead.
+
+    Logger and MQTT client are injected by the runtime owner (a ClientComponent,
+    or a Channel's parent Service). Topic strings are built from owner_id, not
+    by branching on runtime type beyond Channel nesting.
     """
-    
+
     def __init__(
         self,
         id: str,
         component_type: ComponentType,
         title: str,
         description: str,
-        lynx_version: str):
+        lynx_version: str,
+        owner_id: Optional[str] = None,
+        logger: Optional[Logger] = None,
+        mqtt_client: Optional[MqttClient] = None):
         """
         Initialize a Lynx Component.
-        
+
         Args:
             id: Unique identifier for this component
             component_type: Type of component (SERVICE, CHANNEL, etc)
             title: Human-readable title
             description: Human-readable description
             lynx_version: Lynx protocol version this component uses
+            owner_id: MQTT namespace owner. Channels pass their Service id;
+                Services and Nodes default to their own id.
+            logger: Logger used by endpoints. Required before creating endpoints.
+            mqtt_client: MQTT client used by endpoints. Required before creating endpoints.
         """
         self.id: str = id
         self.component_type: ComponentType = component_type
         self.title: str = title
         self.description: str = description
         self.lynx_version: str = lynx_version
+        self._owner_id: str = owner_id if owner_id is not None else id
+        self.logger: Optional[Logger] = logger
+        self.mqtt_client: Optional[MqttClient] = mqtt_client
 
         self.endpoints: Dict[str, Endpoint] = {}
-        # Subclasses initialize the concrete status shape (e.g. connected vs command).
         self._status: Dict[str, Any] = {}
-    
-    
+        self._interface_frozen: bool = False
+
     @abstractmethod
     def produce_about(self) -> Dict:
-        """
-        Produce a dictionary describing this component.
-        
-        This base implementation provides common fields that all components share.
-        Subclasses must override this method to add component-specific information
-        (like time_source for Service, or parent service reference for Channel).
-        
-        Returns:
-            Dictionary containing:
-            - docs: Documentation fields (id, title, description, version, type)
-            - config: Configuration information
-            - status: Status information
-            - endpoints: Dictionary of endpoint information
-        """
+        """Produce a dictionary describing this component."""
         pass
-    
 
-    @abstractmethod
-    def get_client_component(self) -> ClientComponent:
+    def freeze_interface(self) -> None:
         """
-        Get the ClientComponent that owns resources (MQTT client, time_source, logger).
+        Lock the advertised endpoint set and schemas.
+
+        Called before the first @/About publish (A2.1 section 4.7). Subsequent
+        attempts to add endpoints or attach sources raise InterfaceFrozenError.
         """
-        pass
+        self._interface_frozen = True
+
+    def require_mutable_interface(self, action: str = "modify the interface") -> None:
+        if self._interface_frozen:
+            raise InterfaceFrozenError(
+                f"Cannot {action} on {self.component_type.value} '{self.id}' after its "
+                "interface was frozen (first @/About publish)."
+            )
 
     def get_status(self) -> Dict[str, Any]:
-        """
-        Get the status of the component.
-        """
         return self._status
-    
 
     def get_status_dict(self) -> Dict[str, Any]:
-        """
-        Get the status of the component as a dictionary suitable for About payloads.
-        """
         return copy(self._status)
-    
 
-    def set_status(self, about_endpoint: Optional[OutEndpoint] = None, **status_updates: Any) -> Dict[str, Any]:
+    def set_status(self, **status_updates: Any) -> bool:
         """
-        Update status fields and optionally publish a partial About.
-        
-        Args:
-            about_endpoint: If provided, publish the updated status to this endpoint.
-            **status_updates: Status keys to set (e.g. connected=True, command=None).
-        
+        Update status fields in memory. Does not publish.
+
         Returns:
-            The status of the component.
+            True if any field changed.
         """
         changed_status = False
         for key, value in status_updates.items():
             if key not in self._status or self._status[key] != value:
                 self._status[key] = value
                 changed_status = True
-        if changed_status and about_endpoint is not None:
-            status_payload = self.get_status_dict()
-            if self.component_type == ComponentType.CHANNEL:
-                payload = {"channels": {self.id: {"status": status_payload}}}
-            else:
-                payload = {"status": status_payload}
-            about_endpoint.publish(payload=payload)
-        return self._status
-    
-    
-    def _create_endpoint(self, 
-        endpoint_class: Type[Endpoint], 
+        return changed_status
+
+    def _create_endpoint(
+        self,
+        endpoint_class: Type[Endpoint],
         sub_handler: Optional[Callable] = None,
-        **endpoint_args: Dict) -> Endpoint:
+        **endpoint_args: Any) -> Endpoint:
         """
         Create a new endpoint for this component from a dictionary of arguments.
-        
-        This is a convenience method that:
-        - Automatically passes logger and mqtt_client to the endpoint
-        - Constructs the full topic path from the component's ID
-        - Adds the handler for InEndpoints
-        - Resolves reply_topics sentinels for InEndpoints
-        - Registers the endpoint in self.endpoints
-        
-        Args:
-            endpoint_class: The endpoint class to instantiate (InEndpoint or OutEndpoint)
-            endpoint_args: Dictionary of arguments for the endpoint (topic, payload_schema, description, etc.)
-            sub_handler: Handler function for InEndpoints
-            
-        Returns:
-            The created endpoint instance
         """
-        endpoint_args = endpoint_args.copy()
-        client_component = self.get_client_component()
-        endpoint_args["logger"] = client_component.logger
-        endpoint_args["mqtt_client"] = client_component.mqtt_client
-        
-        # Construct full topic path
-        # Service endpoints: "service_id/?/About"
-        # Channel endpoints: "service_id/channel_id/?/About"
-        if endpoint_args.pop("skip_topic_prefixes", False):
-            endpoint_args["topic"] = endpoint_args['topic']
-        elif self.component_type == ComponentType.CHANNEL:
-            endpoint_args["topic"] = f"{client_component.id}/{self.id}/{endpoint_args['topic']}"
-        elif self.component_type == ComponentType.SERVICE:
-            endpoint_args["topic"] = f"{self.id}/{endpoint_args['topic']}"
-        elif self.component_type == ComponentType.NODE:
-            endpoint_args["topic"] = endpoint_args['topic']
-        else:
-            raise ValueError(f"Invalid component type: {self.component_type}")
-        
+        self.require_mutable_interface("add an endpoint")
+        if self.logger is None or self.mqtt_client is None:
+            raise RuntimeError(
+                f"Component '{self.id}' has no logger/mqtt_client; cannot bind endpoints. "
+                "Attach a Service (for Channels) or construct a ClientComponent first."
+            )
+
+        endpoint_args = dict(endpoint_args)
+        endpoint_args["logger"] = self.logger
+        endpoint_args["mqtt_client"] = self.mqtt_client
+
+        skip_prefixes = bool(endpoint_args.pop("skip_topic_prefixes", False))
+        nested_id = self.id if self.component_type == ComponentType.CHANNEL else None
+        endpoint_args["topic"] = build_topic(
+            self._owner_id,
+            endpoint_args["topic"],
+            nested_id=nested_id,
+            skip_prefixes=skip_prefixes)
+
         if issubclass(endpoint_class, InEndpoint):
             endpoint_args["handler"] = sub_handler
             reply_topics = endpoint_args.get("reply_topics")
             if reply_topics is not None:
+                resolved_about = about_topic(self._owner_id)
                 endpoint_args["reply_topics"] = [
-                    client_component.sys_about_endpoint.topic # type: ignore
-                    if t == REPLY_TOPIC_CLIENT_ABOUT else t
+                    resolved_about if t == REPLY_TOPIC_CLIENT_ABOUT else t
                     for t in reply_topics
                 ]
-        
+
         endpoint = endpoint_class(**endpoint_args)
         self.endpoints[endpoint.topic] = endpoint
         return endpoint
-    
 
-    def new_in_endpoint(self,
+    def new_in_endpoint(
+        self,
         sub_handler: Callable,
-        **endpoint_args: Dict) -> InEndpoint:
-        """
-        Create a new sub endpoint for this component from a dictionary of arguments.
-        """
+        **endpoint_args: Any) -> InEndpoint:
+        """Create a new InEndpoint for this component."""
         return self._create_endpoint(InEndpoint, sub_handler, **endpoint_args)
-    
 
-    def new_out_endpoint(self,
-        **endpoint_args: Dict) -> InEndpoint:
-        """
-        Create a new sub endpoint for this component from a dictionary of arguments.
-        """
+    def new_out_endpoint(self, **endpoint_args: Any) -> OutEndpoint:
+        """Create a new OutEndpoint for this component."""
         return self._create_endpoint(OutEndpoint, **endpoint_args)

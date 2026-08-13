@@ -1,10 +1,18 @@
+"""
+Device Watcher example service.
+
+Generative AI was used in the Creation/Modification of this file.
+"""
+
 from typing import Callable
 from lynx_sdk.components.channel import Channel
 from lynx_sdk.components.service import Service
 from lynx_sdk.utils.mqtt_client import InboundMessage
 
+import math
 import psutil
 import threading
+import time
 
 service = Service(
     id="deviceWatcher",
@@ -87,7 +95,7 @@ service.add_channel(memory_channel)
 
 
 
-# -Minute Alert-
+# -Second Alert-
 SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
     "second": {
         "title": "Second",
@@ -108,31 +116,30 @@ SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use th
     }
 }
 
-def second_alert(request: InboundMessage, continue_sampling: Callable):
-    import time
-    last_second = None
-    while continue_sampling(default_interval=0.01):
-        current_second = time.localtime().tm_sec
-        if current_second != last_second:
-            data = {
-                "second": current_second,
-                "time": int(time.time()),
-                "timeString": time.ctime()
-            }
-            last_second = current_second
-            yield data
-
-
 second_channel = Channel(
     id="secondAlert",
     service=service,
     title="Second Alert",
-    description="Emit the time every time the second changes",
+    description="Simulated alert: emits once per wall-clock second.",
     output_data_schema=SECOND_CHANNEL_DATA_SCHEMA,
-    sample_function=second_alert,
     config={"streamOnStartup": False})
 
 service.add_channel(second_channel)
+
+
+def run_second_alerts(channel: Channel) -> None:
+    while True:
+        next_tick = math.floor(time.time()) + 1.0
+        delay = next_tick - time.time()
+        if delay > 0:
+            time.sleep(delay)
+        now = time.time()
+        local = time.localtime(now)
+        channel.add_sample({
+            "second": local.tm_sec,
+            "time": int(now),
+            "timeString": time.ctime(now),
+        })
 
 
 #-Random Number Stream-
@@ -161,4 +168,5 @@ service.add_channel(Channel(
 
 
 if __name__ == "__main__":
+    threading.Thread(target=run_second_alerts, args=(second_channel,), daemon=True).start()
     service.start()

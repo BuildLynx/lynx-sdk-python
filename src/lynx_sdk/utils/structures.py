@@ -1,5 +1,7 @@
 """
 Components are the building blocks of the Lynx SDK.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 
@@ -17,7 +19,7 @@ from enum import Enum
 
 # === CONSTANTS ===
 
-LYNX_VERSION = "A2.0"
+LYNX_VERSION = "A2.1"
 
 
 # === GLOBALS VARIABLES ===

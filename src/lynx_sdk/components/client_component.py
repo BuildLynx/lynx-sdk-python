@@ -1,46 +1,37 @@
 """
 Client Component base class for Lynx. A Client Component is a component that has its own MQTT client (like Service or Node).
+
+Generative AI was used in the Creation/Modification of this file.
+
+Broker resolution, logger construction, MQTT lifecycle, and the serve loop are
+runtime concerns kept here rather than in Component. start(loop="thread") runs
+paho's network thread and a deadline loop; start(loop="pumped") connects and
+returns so the application can call pump().
 """
 
-
-
-# === IMPORTS ===
-
-# -stdlib Imports-
 import json
 import logging
 import os
-from typing import Dict, Any, abstractmethod, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 import time
 import sys
 
-# -Lynx Imports-
 from lynx_sdk.components.component import Component, ComponentType
 from lynx_sdk.utils.mqtt_client import MqttClient
 from lynx_sdk.models.time_source import TimeSource, instantiate_ideal_time_source
 from lynx_sdk.models.network_state import NetworkState
 
-# -External Imports-
 import paho.mqtt.client as mqtt
 
-
-
-# === CONSTANTS ===
 
 CONNECT_RETRY_INTERVAL: int = 5
 KEEPALIVE_INTERVAL: int = 60
 _CONF_FILENAME = "lynxConf.json"
+DEADLINE_SLEEP_CAP_S: float = 0.1
 
 
-
-# === GLOBALS VARIABLES ===
-
-
-
-# === FUNCTIONS ===
-
-def _resolve_broker_socket() -> Tuple[str, int]:
+def resolve_broker_socket() -> Tuple[str, int]:
     """
     Resolve the MQTT broker (host, port) using the following priority:
       1. UPSTREAM_NODE_HOST / UPSTREAM_NODE_PORT environment variables
@@ -67,7 +58,23 @@ def _resolve_broker_socket() -> Tuple[str, int]:
     return ("localhost", 1883)
 
 
-#  === CLASSES ===
+def _resolve_broker_socket() -> Tuple[str, int]:
+    """Backward-compatible alias."""
+    return resolve_broker_socket()
+
+
+def configure_logger(component_id: str, logger: Optional[logging.Logger] = None) -> logging.Logger:
+    """Return the given logger, or a stdout DEBUG logger named after the component."""
+    if logger is not None:
+        return logger
+    configured = logging.getLogger(component_id)
+    configured.setLevel(level=logging.DEBUG)
+    stream_handler = logging.StreamHandler(stream=sys.stdout)
+    stream_handler.setLevel(level=logging.DEBUG)
+    configured.addHandler(stream_handler)
+    configured.propagate = False
+    return configured
+
 
 class ClientComponent(Component):
     def __init__(self,
@@ -81,63 +88,42 @@ class ClientComponent(Component):
         track_network_state: bool = False):
         """
         Initialize a Lynx Client Component.
-        Args:
-            id: The unique identifier for this component.
-            component_type: The type of component this is.
-            title: The human-readable title of this component.
-            description: The human-readable description of this component.
-            lynx_version: The Lynx protocol version this component is using.
-            time_source: The time source to use for this component.
-            logger: The logger to use for this component.
-            track_network_state: Whether to track the network state for this component.
         """
+        logger = configure_logger(id, logger)
+        time_source = time_source or instantiate_ideal_time_source()
+        mqtt_client = MqttClient(client_id=id, time_source=time_source)
+
         super().__init__(
-            id=id, 
-            component_type=component_type, 
-            title=title, 
-            description=description, 
-            lynx_version=lynx_version)
+            id=id,
+            component_type=component_type,
+            title=title,
+            description=description,
+            lynx_version=lynx_version,
+            owner_id=id,
+            logger=logger,
+            mqtt_client=mqtt_client)
 
         self._status = {"connected": False}
-        
-        self.broker_socket: Tuple[str, int] = _resolve_broker_socket()
-        self.time_source: TimeSource = time_source or instantiate_ideal_time_source()
-        
-        if logger is None:
-            self.logger: logging.Logger = logging.getLogger(id)
-            self.logger.setLevel(level=logging.DEBUG)
-            stream_handler = logging.StreamHandler(stream=sys.stdout)
-            stream_handler.setLevel(level=logging.DEBUG)
-            self.logger.addHandler(stream_handler)
-            self.logger.propagate = False
-        else:
-            self.logger = logger
 
+        self.broker_socket: Tuple[str, int] = resolve_broker_socket()
+        self.time_source: TimeSource = time_source
         self.client_endpoint_topics_set: set[str] = set[str]()
-        self.mqtt_client: MqttClient = MqttClient(
-            client_id=id,
-            time_source=self.time_source
-        )
-
         self.network_state: Optional[NetworkState] = NetworkState() if track_network_state else None
+        self._running: bool = False
 
 
-    @abstractmethod
     def publish_about(self) -> Dict:
-        """
-        Publish the about information to the MQTT broker.
-        """
-        pass
-    
-    
+        raise NotImplementedError
+
+
     def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
         """
         Emit a notice that the service received a message on an endpoint that is not configured.
         """
         if message.topic in self.client_endpoint_topics_set:
-            return # This prevents infinite loop of service responding to its own messages
+            return
         if not message.topic.startswith(f"{self.id}/"):
-            return # If the message is not for this component, ignore it
+            return
         self.logger.warning(f"Received message on topic \"{message.topic}\" but no endpoint is configured to handle it.")
 
 
@@ -152,53 +138,95 @@ class ClientComponent(Component):
                 subscribe_topic_filter = "#"
             self.mqtt_client.subscribe(subscribe_topic_filter, qos=2)
 
-            self._status["connected"] = True
+            self.set_status(connected=True)
             self.publish_about()
         except Exception as e:
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
-    
-    
+
+
     def on_disconnect(self, client: mqtt.Client, userdata: Any, disconnect_flags: Dict, reason_code: int, properties: mqtt.Properties):
         """
         Callback for when the client disconnects from the MQTT broker.
         """
-        self._status["connected"] = False
+        self.set_status(connected=False)
         self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
 
 
-    def start(self, infinite_loop: bool = True):
+    def service_deadlines(self) -> None:
+        """Flush any due protocol deadlines. Services override this to pump Channels."""
+        return
+
+
+    def soonest_deadline_ns(self) -> Optional[int]:
+        """perf_counter_ns of the next protocol deadline, or None."""
+        return None
+
+
+    def pump(self, timeout: float = 0.1) -> None:
         """
-        Start the MQTT Client.
+        Process MQTT traffic once and service protocol deadlines.
+
+        This is the single-threaded / user-owned loop entry point (loop="pumped").
+        Command handlers run on the thread that calls pump().
         """
-        # Set default callbacks
+        self.mqtt_client.loop(timeout=timeout)
+        self.service_deadlines()
+
+
+    def _connect_with_retry(self) -> None:
         self.mqtt_client.set_on_message(self.no_endpoint_message)
         self.mqtt_client.set_on_connect(self.on_connect)
-
-        # Set will message and disconnect callback
         self.mqtt_client.set_will(topic=f"{self.id}/@/About", payload='{"status":{"connected":false}}', qos=1, retain=True)
         self.mqtt_client.client.on_disconnect = self.on_disconnect
 
-        # Attempt to connect to broker
         while True:
             try:
                 self.mqtt_client.connect(host=self.broker_socket[0], port=self.broker_socket[1], keepalive=KEEPALIVE_INTERVAL)
                 break
-            except ConnectionRefusedError as e:
-                self.logger.error(f"Failed to connect to MQTT broker ({self.broker_socket[0]}:{self.broker_socket[1]}), is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
+            except ConnectionRefusedError:
+                self.logger.error(
+                    f"Failed to connect to MQTT broker ({self.broker_socket[0]}:{self.broker_socket[1]}), "
+                    f"is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
                 time.sleep(CONNECT_RETRY_INTERVAL)
-                continue
-        
-        # Start network loop
+
+
+    def _run_deadline_loop(self) -> None:
+        """Sleep until the next batch deadline (capped) and flush. MQTT runs on paho's thread."""
+        self._running = True
+        while self._running:
+            deadline = self.soonest_deadline_ns()
+            if deadline is None:
+                time.sleep(DEADLINE_SLEEP_CAP_S)
+            else:
+                remaining = (deadline - time.perf_counter_ns()) / 1_000_000_000
+                time.sleep(max(0.0, min(remaining, DEADLINE_SLEEP_CAP_S)))
+            self.service_deadlines()
+
+
+    def start(self, infinite_loop: bool = True, loop: str = "thread"):
+        """
+        Connect to the broker and begin serving.
+
+        The advertised interface is frozen here, before connect, so the first
+        @/About cannot change afterwards.
+
+        Args:
+            infinite_loop: When loop="thread", block until stopped.
+            loop: "thread" starts paho's background network loop. "pumped" connects
+                and returns; the caller must invoke pump() regularly.
+        """
+        if loop not in ("thread", "pumped"):
+            raise ValueError(f"loop must be 'thread' or 'pumped', got {loop!r}")
+
+        self.freeze_interface()
+        self._connect_with_retry()
+
+        if loop == "pumped":
+            self.logger.debug(f"{self.id} connected in pumped mode; call pump() to serve")
+            return
+
         self.mqtt_client.loop_start()
-        
-        # Keep service running
         self.logger.debug(f"{self.id} started successfully, entering main loop")
-        while infinite_loop:
-            time.sleep(1)
-
-
-
-# === MAIN LOOP ===
-
-
+        if infinite_loop:
+            self._run_deadline_loop()

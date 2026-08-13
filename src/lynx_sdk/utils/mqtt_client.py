@@ -1,5 +1,7 @@
 """
 MQTT Client wrapper for Lynx. Provides a unified interface for MQTT operations.
+
+Generative AI was used in the Creation/Modification of this file.
 """
 
 
@@ -191,6 +193,14 @@ class MqttClient:
     def loop_start(self) -> None:
         """Start the network loop in a background thread."""
         self.client.loop_start()
+
+    def loop(self, timeout: float = 1.0) -> int:
+        """
+        Process network events once. Used by pumped (user-owned) serve loops.
+
+        Handlers registered on InEndpoints run on the calling thread.
+        """
+        return self.client.loop(timeout=timeout)
     
     
     def loop_stop(self) -> None:

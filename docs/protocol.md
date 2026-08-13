@@ -1,6 +1,8 @@
+<!-- Generative AI was used in the Creation/Modification of this file -->
+
 # The Lynx Protocol
 
-**Version: A2.0**
+**Version: A2.1**
 
 ---
 
@@ -45,7 +47,7 @@ graph TD
 |-------|------|
 | **Node** | Broker-adjacent coordinator. Monitors connected Services and child Nodes, maintains a NetworkState tree. |
 | **Service** | Application boundary. Owns an MQTT client, a time source, and one or more Channels. Publishes a retained self-description. |
-| **Channel** | Single data stream. Accepts Poll/Stream/Stop commands and publishes timestamped sample arrays. |
+| **Channel** | Single data stream. Accepts commands (`Poll`, `Stream`, `Stop`, or application-defined) and publishes timestamped sample arrays. |
 
 A Lynx network can run with just a Service connected to any MQTT broker -- Nodes are optional. Any vanilla MQTT client can subscribe to Lynx topics and consume the JSON payloads directly.
 
@@ -59,13 +61,13 @@ A Lynx network can run with just a Service connected to any MQTT broker -- Nodes
 - **Edge monitoring and fleet dashboards.** Nodes at the edge track which Services are alive, their status, and their channel states -- forming a real-time topology view.
 - **Schema-enforced IoT data pipelines.** Every Channel declares its output schema. Consumers know the shape of the data before the first sample arrives.
 - **Self-describing, discoverable service networks.** No external service registry needed. Subscribe to `+/@/About` and the network describes itself.
-- **Rapid prototyping.** Define a Service, attach a Channel with a generator function, call `start()`. Data flows in seconds.
+- **Rapid prototyping.** Define a Service, attach a Channel with a data source, start it. Data flows in seconds.
 - **Lightweight data acquisition (DAQ) systems.** Stream parameters (`sampleInterval`, `numSamples`, `batch`) give fine-grained control over sampling rate and how samples are grouped into published messages.
 
 ### 3.2 Non-Ideal Fits
 
 - **No TCP/IP network available.** Lynx is built on MQTT which requires TCP/IP. Additionally an MQTT broker or Lynx Node is required.
-- **Heavy computation inside sampling loops.** CPU-bound or long-blocking work inside the sample function delays sample production. Batch flushes (including empty keepalives and the stream-end flush) MUST proceed independently of the sample function, but a blocked generator still cannot produce new samples until it returns.
+- **Heavy computation inside sampling loops.** CPU-bound or long-blocking work in a Channel's data source delays sample production. Batch flushes (including empty keepalives and the stream-end flush) MUST proceed independently of the source, but a blocked source still cannot produce new samples until it returns.
 - **Non-JSON / binary payloads.** Lynx payloads are JSON objects. Large binary data (images, video, raw ADC buffers) would need base64 encoding or an out-of-band mechanism.
 - **Very large-scale deployments (1k+ devices).** Every Service publishes a retained `@/About` message. At extreme scale, the broker's retained message store and the wildcard subscription `+/@/About` may become bottlenecks.
 - **RPC-heavy / request-response architectures.** Lynx is oriented around pub/sub data streams, not request-response patterns. While `?/About` is a query-response pattern, Channels are one-directional output streams.
@@ -85,6 +87,8 @@ The base entity in Lynx. Every Component has:
 
 ### 4.2 Component Types
 
+The diagram below describes protocol roles, not the classes of any particular SDK. It names only what is observable on the wire.
+
 ```mermaid
 classDiagram
     Component <|-- ClientComponent
@@ -93,51 +97,49 @@ classDiagram
     Component <|-- Channel
 
     class Component {
-        id: string
-        title: string
-        description: string
-        lynx_version: string
-        endpoints: dict
-        status: dict
-        produce_about() dict
+        id
+        title
+        description
+        lynx_version
+        endpoints
+        config
+        status
+        About
     }
 
     class ClientComponent {
-        mqtt_client: MqttClient
-        time_source: TimeSource
-        logger: Logger
-        network_state: NetworkState
-        start()
+        owns an MQTT connection
+        time_source
+        retained About
+        Last Will and Testament
     }
 
     class Service {
-        channels: dict
-        publish_about()
+        channels
     }
 
     class Node {
-        about_cache: dict
-        parent_node_socket: tuple
-        publish_about()
+        services
+        childNodes
     }
 
     class Channel {
-        service: Service
-        sample_function: Callable
-        poll_handler()
-        start_stream_handler()
-        stop_handler()
+        commands
+        data output
     }
 ```
 
-- **Service** and **Node** are *client components* -- they own an MQTT connection. A Channel does not; it accesses the broker through its parent Service.
+- **Service** and **Node** are *client components* -- they own an MQTT connection, and so have a `connected` status and a Last Will. A Channel does not; it is reached through its parent Service's topic namespace.
 - A Service contains zero or more Channels. A Node monitors zero or more Services and child Nodes.
+- A Channel's endpoint set is not fixed. See section 7.1.
+
+How an implementation arranges these roles internally -- which objects hold the MQTT client, which own scheduling, whether a Channel is one class or several -- is outside the scope of this specification.
 
 ### 4.3 Endpoints
 
 An Endpoint is a single MQTT topic with:
 - A **direction**: `sub` (subscribes and handles incoming messages), `pub` (publishes outgoing messages), or `pubsub`.
-- A **payload schema**: JSON Schema (Draft 7) describing the expected payload.
+- A **payload schema**: a complete JSON Schema (Draft 7) object describing the expected payload. See section 4.6 for the canonical form and the requirement that the advertised schema be the enforced one.
 - A **description**: human-readable purpose.
 
 ### 4.4 About
@@ -164,9 +166,42 @@ Each endpoint in a component's About is keyed by its full MQTT topic string and 
 |-------|------|----------|------------|-------------|
 | `endpoint_direction` | string | yes | all | `"sub"`, `"pub"`, or `"pubsub"`. |
 | `description` | string | no | all | Human-readable purpose of the endpoint. |
-| `payload_schema` | object | no | all | JSON Schema (Draft 7) describing the payload shape. |
+| `payload_schema` | object | no | all | Complete JSON Schema (Draft 7) object describing the payload shape (see below). |
+| `additionalProperties` | boolean | no | all | Present when `payload_schema` is present. Mirrors the schema's own `additionalProperties` (see below). |
 | `replyTopics` | array of strings | no | InEndpoints only | Nominal non-data reply topics (see below). |
 | `dataOutput` | boolean | no | Channel InEndpoints only | Whether this endpoint may publish to the channel's `<` topic (see below). |
+
+#### `payload_schema`
+
+`payload_schema` MUST be a complete JSON Schema (Draft 7) object -- one carrying a `type` keyword and, for object payloads, a `properties` map. A bare map of property names to subschemas is **not** valid:
+
+```json
+"payload_schema": {
+  "contents": { "type": ["object", "boolean"], "default": true }
+}
+```
+
+A Draft-7 validator sees no recognized keywords in the object above, treats it as the empty schema, and accepts any payload whatsoever. The correct form is:
+
+```json
+"payload_schema": {
+  "type": "object",
+  "properties": {
+    "contents": { "type": ["object", "boolean"], "default": true }
+  },
+  "additionalProperties": false
+}
+```
+
+**The advertised schema MUST be the enforced schema.** A component MUST validate payloads against exactly the schema it publishes in About. An implementation that accepts an authoring shorthand internally MUST normalize it to canonical form before publishing, and MUST validate against the normalized form, so that a consumer applying the advertised schema reaches the same accept/reject decision as the component itself.
+
+`$schema` MAY be included and, when present, MUST be `"http://json-schema.org/draft-07/schema#"`.
+
+#### `additionalProperties`
+
+Whether unrecognized keys are accepted is part of an endpoint's contract, so it MUST be observable. When `payload_schema` declares a top-level `additionalProperties`, the endpoint metadata MUST carry the same value alongside it. For object payloads an implementation MUST declare it, defaulting to `false`.
+
+The field is omitted for payloads that are not objects. The channel data topic `<` is the one built-in case: its payload is an array, `additionalProperties` has no meaning at the top level of an array schema, and the constraint that matters is carried by `items` instead.
 
 #### `replyTopics`
 
@@ -202,6 +237,18 @@ Setting `dataOutput: true` is invalid if the channel does not have a `<` endpoin
 
 OutEndpoints (`<`, `@/About`, `@/Notice`) never carry `dataOutput`.
 
+### 4.7 Interface Stability
+
+A component's **interface** is its set of endpoints together with their metadata: directions, payload schemas, `additionalProperties`, `replyTopics`, and `dataOutput`. In About terms, it is everything under `endpoints` -- including the `endpoints` of each Channel -- as distinct from the mutable `config` and `status`.
+
+**A component's interface MUST NOT change after its first `@/About` publish.** Endpoints may not be added or removed, and schemas may not be altered, for the lifetime of that component's connection.
+
+This rule exists because `@/About` is retained (section 10.1). A consumer may hold a cached copy of an interface it received from the broker's retained store minutes or hours earlier, with no notification that anything changed. Interfaces that mutate after announcement cannot be cached, which would defeat retained About as a discovery mechanism.
+
+Implementations that let an application compose Channel commands or attach data sources therefore MUST require that composition to be complete before connecting. Any attempt to alter the interface after the first About publish MUST fail rather than silently republish a different interface.
+
+`config` and `status` are explicitly **not** part of the interface and are expected to change at runtime. Partial About updates that carry only `status` (section 10.5) do not violate this rule.
+
 ---
 
 ## 5. Topic Structure
@@ -218,7 +265,7 @@ Lynx uses symbolic prefixes in topic segments to distinguish system topics from 
 |--------|------|---------|---------|
 | `@` | System | Published by the component automatically (About, Notice) | `deviceWatcher/@/About` |
 | `?` | Query | Subscribe to receive a query; response published on `@` | `deviceWatcher/?/About` |
-| `!` | Command | Channel commands (Poll, Stream, Stop) | `deviceWatcher/cpuLoad/!/Stream` |
+| `!` | Command | Channel commands: the built-ins `Poll`, `Stream`, `Stop`, or application-defined actions | `deviceWatcher/cpuLoad/!/Stream` |
 | `<` | Output | Channel data output | `deviceWatcher/cpuLoad/<` |
 
 ### 5.2 Topic Tree Example
@@ -255,20 +302,24 @@ The full topic strings for this service are:
 | `deviceWatcher/@/About` | pub | 1 | yes | Service self-description |
 | `deviceWatcher/?/About` | sub | -- | -- | Query service info |
 | `deviceWatcher/@/Notice` | pub | 1 | no | Log/alert messages |
-| `deviceWatcher/cpuLoad/!/Poll` | sub | -- | -- | Request a single sample |
+| `deviceWatcher/cpuLoad/!/Poll` | sub | -- | -- | Produce one sample immediately |
 | `deviceWatcher/cpuLoad/!/Stream` | sub | -- | -- | Start continuous sampling |
-| `deviceWatcher/cpuLoad/!/Stop` | sub | -- | -- | Stop active sampling |
+| `deviceWatcher/cpuLoad/!/Stop` | sub | -- | -- | End the active command |
 | `deviceWatcher/cpuLoad/<` | pub | 0 | no | Sample data output |
-| `deviceWatcher/memory/!/Poll` | sub | -- | -- | Request a single sample |
+| `deviceWatcher/memory/!/Poll` | sub | -- | -- | Produce one sample immediately |
 | `deviceWatcher/memory/!/Stream` | sub | -- | -- | Start continuous sampling |
-| `deviceWatcher/memory/!/Stop` | sub | -- | -- | Stop active sampling |
+| `deviceWatcher/memory/!/Stop` | sub | -- | -- | End the active command |
 | `deviceWatcher/memory/<` | pub | 0 | no | Sample data output |
+
+Both Channels above happen to expose the same commands. That is a property of this example, not a rule: Channel interfaces are composed per Channel (section 7.1), so a third Channel in the same Service might expose only `!/Stream`, `!/Stop`, and `<`, or might add an application-defined command such as `!/Calibrate`.
 
 ### 5.3 Topic Construction Rules
 
 - **Service endpoints**: `{serviceId}/{prefix}/{action}` -- e.g., `deviceWatcher/@/About`
 - **Channel endpoints**: `{serviceId}/{channelId}/{prefix}/{action}` -- e.g., `deviceWatcher/cpuLoad/!/Stream`
 - **Node endpoints**: the Node's own About uses `{nodeId}/@/About`, but the monitor endpoint subscribes to `+/@/About` (a wildcard that catches all direct children).
+
+Component and channel IDs, and command actions, each occupy exactly one topic segment: they MUST NOT be empty, MUST NOT contain `/`, and MUST NOT contain the MQTT wildcards `+` or `#`.
 
 ---
 
@@ -291,7 +342,7 @@ Publishes log-level notices (DEBUG through CRITICAL) as structured JSON.
 
 ### 6.2 About Payload
 
-The `@/About` payload for a Service looks like this:
+The `@/About` payload for a Service looks like this. `?/About` is shown with its schema in full; elsewhere `payload_schema` bodies are abbreviated as `{ ... }` for readability. Note that `{}` is a *valid* schema meaning "accept anything", so it is never used as an elision marker.
 
 ```json
 {
@@ -300,7 +351,7 @@ The `@/About` payload for a Service looks like this:
     "id": "deviceWatcher",
     "title": "Device Watcher",
     "description": "Watches the device running this service and publishes statistics.",
-    "lynx_version": "A2.0",
+    "lynx_version": "A2.1",
     "time_source": "unix"
   },
   "config": {},
@@ -311,24 +362,39 @@ The `@/About` payload for a Service looks like this:
     "deviceWatcher/@/About": {
       "endpoint_direction": "pub",
       "description": "Publish information about the Component.",
-      "payload_schema": { }
+      "payload_schema": { ... },
+      "additionalProperties": false
     },
     "deviceWatcher/?/About": {
       "endpoint_direction": "sub",
       "description": "Query information about the Component.",
-      "payload_schema": { },
+      "payload_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "contents": {
+            "title": "contents Object",
+            "description": "Omit or true for the full payload. An empty object {} selects no keys.",
+            "type": ["object", "boolean"],
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "additionalProperties": false,
       "replyTopics": ["deviceWatcher/@/About"]
     },
     "deviceWatcher/@/Notice": {
       "endpoint_direction": "pub",
       "description": "Publish a notice about the Component.",
-      "payload_schema": { }
+      "payload_schema": { ... },
+      "additionalProperties": false
     }
   },
   "channels": {
     "cpuLoad": {
       "lynxType": "Channel",
-      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.0" },
+      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.1" },
       "config": {},
       "status": {
         "command": null
@@ -336,35 +402,41 @@ The `@/About` payload for a Service looks like this:
       "endpoints": {
         "deviceWatcher/cpuLoad/!/Poll": {
           "endpoint_direction": "sub",
-          "description": "Start polling at a set time interval on the channel for data.",
-          "payload_schema": { },
+          "description": "Produce one sample immediately.",
+          "payload_schema": { ... },
+          "additionalProperties": false,
           "replyTopics": [],
           "dataOutput": true
         },
         "deviceWatcher/cpuLoad/!/Stream": {
           "endpoint_direction": "sub",
           "description": "Start streaming on the channel, emitting data when available.",
-          "payload_schema": { },
+          "payload_schema": { ... },
+          "additionalProperties": false,
           "replyTopics": ["deviceWatcher/@/About"],
           "dataOutput": true
         },
         "deviceWatcher/cpuLoad/!/Stop": {
           "endpoint_direction": "sub",
-          "description": "Stop polling or streaming on the channel.",
-          "payload_schema": { },
+          "description": "Stop the active command on the channel.",
+          "payload_schema": { ... },
+          "additionalProperties": false,
           "replyTopics": ["deviceWatcher/@/About"],
           "dataOutput": false
         },
         "deviceWatcher/cpuLoad/<": {
           "endpoint_direction": "pub",
           "description": "Output data from the channel.",
-          "payload_schema": { }
+          "payload_schema": { ... },
+          "additionalProperties": false
         }
       }
     }
   }
 }
 ```
+
+This Channel happens to expose all three built-in commands. That is not guaranteed; see section 7.1.
 
 Key sections:
 
@@ -374,30 +446,40 @@ Key sections:
 | `docs` | Immutable | Identity metadata: `id`, `title`, `description`, `lynx_version`, `time_source`. |
 | `config` | Mutable | Runtime configuration. Application-defined. |
 | `status` | Mutable | Current `connected` state. |
-| `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, description, and optional `replyTopics` / `dataOutput`). |
-| `channels` | Mixed | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). |
+| `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, `additionalProperties`, description, and optional `replyTopics` / `dataOutput`). Fixed once announced; see section 4.7. |
+| `channels` | Mixed | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). The set of channels and their endpoints is immutable; their `config` and `status` are not. |
 
 ### 6.3 Service Lifecycle
+
+A Service passes through three phases: **compose**, during which its interface is defined; **announce**, which connects and publishes About; and **serve**, during which it handles requests and produces data.
 
 ```mermaid
 sequenceDiagram
     participant S as Service
     participant B as MQTT Broker
 
-    S->>B: Set LWT: {serviceId}/@/About = {"status":{"connected":false}} (retained)
+    Note over S: "Compose - declare channels, commands, schemas"
+    Note over S: "Interface is now frozen - see 4.7"
+
+    S->>B: "Set LWT: {serviceId}/@/About = status.connected false, retained"
     S->>B: CONNECT
     B-->>S: CONNACK
-    S->>B: SUBSCRIBE {serviceId}/#
-    S->>B: PUBLISH {serviceId}/@/About (retained, QoS 1)
+    S->>B: "SUBSCRIBE {serviceId}/#"
+    S->>B: "PUBLISH {serviceId}/@/About - retained, QoS 1"
     Note over S,B: Service is now live and discoverable
 
-    loop Main Loop
-        S->>S: sleep(1)
+    loop Serve
+        B-->>S: "Requests on ?/About and channel command topics"
+        S->>B: "About, Notice, and channel data"
     end
 
-    Note over S,B: On unexpected disconnect:
-    B->>B: Broker publishes LWT to {serviceId}/@/About
+    Note over S,B: On unexpected disconnect
+    B->>B: "Broker publishes LWT to {serviceId}/@/About"
 ```
+
+The interface MUST be complete before the About publish, and MUST NOT change afterwards (section 4.7). Everything a Service will ever advertise is therefore settled during compose.
+
+**Execution ownership is out of scope.** This specification does not say what drives the serve phase. An implementation MAY own a thread and block the caller, MAY integrate with an application's existing event loop, or MAY require the application to call into it periodically. What matters is only that the obligations defined elsewhere are met on time: batch flush deadlines (section 7.6), MQTT keepalive, and prompt handling of `!/Stop`. A component that cannot meet them because nothing is servicing its runtime is non-conformant regardless of how it is scheduled.
 
 ### 6.4 Broker Resolution
 
@@ -427,55 +509,112 @@ if __name__ == "__main__":
 
 ## 7. Channels
 
-A Channel is the data path within a Service. It encapsulates a single input/output data stream with a standardized command interface (Poll, Stream, Stop) and structured output.
+A Channel is the data path within a Service. It encapsulates a single input/output data stream: a set of commands that clients may invoke, and structured output on `<`.
 
-### 7.1 Channel Endpoints
+### 7.1 Channel Interfaces
 
-Every Channel creates four endpoints under its parent Service's topic namespace:
+A Channel's endpoint set is **derived from the capabilities it declares**, not fixed by this specification. Two Channels in the same Service may expose different commands, and a Channel may expose commands this specification does not define (section 7.3).
 
-| Endpoint | Direction | `replyTopics` | `dataOutput` | Purpose |
-|----------|-----------|---------------|--------------|---------|
-| `{serviceId}/{channelId}/!/Poll` | sub | `[]` | `true` | Request a single sample |
-| `{serviceId}/{channelId}/!/Stream` | sub | `["{serviceId}/@/About"]` | `true` | Start continuous sampling |
-| `{serviceId}/{channelId}/!/Stop` | sub | `["{serviceId}/@/About"]` | `false` | Halt an active stream |
-| `{serviceId}/{channelId}/<` | pub | -- | -- | Data output (array of timestamped samples) |
+Through A2.0, every Channel was required to expose `!/Poll`, `!/Stream`, `!/Stop`, and `<`. That guarantee is withdrawn, because not every data source can satisfy every command. A Channel fed by an application that pushes samples as events occur cannot produce a reading on demand, so advertising `!/Poll` would promise something it cannot deliver. Rather than have such a Channel accept Poll and answer with a stale or synthetic value, A2.1 has it omit the endpoint.
 
-### 7.2 Poll / Stream / Stop Lifecycle
+**Consumers MUST read a Channel's About before invoking commands on it.** A client MUST NOT assume `!/Poll` or `!/Stream` exists on one Channel because it exists on another. Publishing to a command topic a Channel does not advertise has no defined effect: the Channel is not obliged to respond, and MAY emit a Notice (section 11).
+
+#### Required structure
+
+Composition is constrained. Every Channel MUST satisfy all of the following:
+
+| Rule | Rationale |
+|------|-----------|
+| At least one command endpoint under `!/` | A Channel with no commands cannot be interacted with, and conveys nothing that Service-level About does not already carry. |
+| A `<` endpoint if and only if some command declares `dataOutput: true` | Section 4.6 already forbids `dataOutput: true` without `<`. The converse prevents advertising a data topic that nothing can ever publish to. |
+| `!/Stop` if any command may remain active across messages | Without Stop, a long-running command could only be ended by the Channel itself, leaving the client no way to reclaim it. |
+| `!/Stop` only if some command may remain active | Stop would otherwise have nothing to act upon. |
+
+A Channel with no `<` endpoint is legal: a Channel may exist solely to accept commands that act on a device and acknowledge on other topics via `replyTopics`.
+
+Interfaces are fixed once announced; see section 4.7.
+
+#### Discovering a Channel's capabilities
+
+Everything a client needs is already in the Channel's About:
+
+- **Which commands exist** -- the keys under `endpoints` containing an `!/` segment.
+- **What each accepts** -- that endpoint's `payload_schema`. A command that omits a parameter does not support it. A Channel supporting `contents` but not `sampleInterval` advertises a `!/Stream` schema whose `properties` contain the former and not the latter (section 7.5).
+- **Which produce data** -- `dataOutput`.
+- **What else each replies on** -- `replyTopics`.
+
+Because `additionalProperties` is `false` by default (section 4.6), sending an unsupported parameter is a validation failure rather than a silently ignored field. Clients can therefore rely on schema absence meaning genuine absence.
+
+### 7.2 Built-in Commands
+
+Three command names have protocol-defined meanings. A Channel MUST NOT use these names for other purposes, though it need not implement any of them.
+
+| Endpoint | Direction | `replyTopics` | `dataOutput` | Purpose | Required |
+|----------|-----------|---------------|--------------|---------|----------|
+| `{serviceId}/{channelId}/!/Poll` | sub | `[]` | `true` | Produce one sample immediately | no |
+| `{serviceId}/{channelId}/!/Stream` | sub | `["{serviceId}/@/About"]` | `true` | Begin continuous sampling | no |
+| `{serviceId}/{channelId}/!/Stop` | sub | `["{serviceId}/@/About"]` | `false` | End the active command | conditional (7.1) |
+| `{serviceId}/{channelId}/<` | pub | -- | -- | Data output (array of timestamped samples) | conditional (7.1) |
+
+**`!/Poll`** produces exactly one sample and publishes it as a one-element array on `<`, with `s` and `ns` both `0`. Poll does not set `status.command`, because it completes within the handling of its request. A Channel MUST NOT advertise `!/Poll` unless it can produce a sample on demand at the moment the request arrives.
+
+**`!/Stream`** begins a long-running command. It sets `status.command`, opens a batch, and publishes on `<` according to the batching rules in section 7.6 until it is stopped, reaches `numSamples`, or its data source is exhausted.
+
+**`!/Stop`** ends whatever command is currently active, flushes once, and clears `status.command`. Stop on an idle Channel is a no-op and MUST NOT produce a data message.
+
+#### Lifecycle
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant Ch as Channel
-    participant Out as {channelId}/<
+    participant Out as ChannelDataTopic
+    participant About as ServiceAboutTopic
 
-    rect rgb(240, 240, 240)
-        Note over C,Out: Poll (one-shot)
-        C->>Ch: !/Poll {}
-        Ch->>Ch: Call sample_function, yield once
-        Ch->>Out: [{s: 0, ns: 0, data: {...}}]
+    Note over C,About: Poll - one-shot, no status change
+    C->>Ch: "!/Poll"
+    Ch->>Ch: "Produce one sample"
+    Ch->>Out: "[{s:0, ns:0, data:{...}}]"
+
+    Note over C,About: Stream - long-running
+    C->>Ch: "!/Stream {contents, numSamples, batch}"
+    Ch->>Ch: "Open batch, arm flush deadline"
+    Ch->>About: "status.command = {command: Stream, payload}"
+    loop Until Stop, numSamples reached, or source exhausted
+        Ch->>Ch: "add_sample"
+        Note over Ch,Out: "Flush on maxSamples or maxInterval - see 7.6"
+        Ch->>Out: "Batch, or [] when a deadline finds it empty"
     end
 
-    rect rgb(230, 245, 255)
-        Note over C,Out: Stream (continuous)
-        C->>Ch: !/Stream {sampleInterval: 0.5, numSamples: 0, batch: {maxInterval: 300, maxSamples: 1}}
-        Ch->>Ch: Set status.command = {command: Stream, payload: ...}
-        Ch->>Ch: Open empty batch, start batch timer
-        loop Until Stop, numSamples reached, or generator ends
-            Ch->>Ch: yield sample (at sampleInterval)
-            Note over Ch,Out: Flush when maxSamples or maxInterval is reached (see 7.5)
-        end
-    end
-
-    rect rgb(255, 240, 240)
-        Note over C,Out: Stop / stream end
-        C->>Ch: !/Stop {}
-        Ch->>Ch: Set exit flag
-        Ch->>Out: Remaining samples, or [] if the buffer is empty
-        Ch->>Ch: Set status.command = null
-    end
+    Note over C,About: Stop or command end
+    C->>Ch: "!/Stop"
+    Ch->>Out: "Remaining samples, or [] if the buffer is empty"
+    Ch->>About: "status.command = null"
 ```
 
-### 7.3 Output Format
+### 7.3 User-Defined Commands
+
+A Channel MAY declare command endpoints beyond the built-ins of section 7.2 -- `!/Calibrate`, `!/Tare`, `!/Reset` -- and describe them with the same metadata every other endpoint uses. No extension mechanism is needed: `replyTopics` and `dataOutput` were defined in A2.0 as general endpoint fields, so a user-defined command is already fully describable. A2.1 only makes the permission explicit, since A2.0's fixed four-endpoint table implied a closed set.
+
+**Naming.** A command topic is `{serviceId}/{channelId}/!/{Action}`. `{Action}` MUST be a single non-empty topic segment: no `/`, and no MQTT wildcards (`+`, `#`). Actions SHOULD be PascalCase for consistency with the built-ins. Action names are case-sensitive and MUST be unique within a Channel.
+
+**Reserved names.** `Poll`, `Stream`, and `Stop` are reserved with the meanings given in section 7.2. To leave room for future built-ins without breaking deployed services, user-defined actions SHOULD NOT be single common verbs likely to be standardized later -- `Start`, `Pause`, `Resume`, `Reset`, `Configure`. Prefixing an application-specific action, as in `!/AcmeCalibrate`, avoids collision entirely. Future versions of this specification will only add built-ins in the reserved style described here, and will list any additions in Appendix B.
+
+**Metadata obligations.** A user-defined command is an InEndpoint, so:
+
+- It MUST declare a `payload_schema` in canonical form (section 4.6), even if that schema is the empty-object form used by `!/Stop`.
+- It SHOULD declare `replyTopics`, using `[]` to state explicitly that it has no nominal reply.
+- It MUST declare `dataOutput` if it may publish to `<`, and doing so requires the Channel to have a `<` endpoint.
+
+**Long-running user-defined commands.** A user-defined command MAY be long-running, in which case it MUST set `status.command` with its own action name in the `command` field:
+
+```json
+{ "command": "Calibrate", "payload": { "reference": 100.0 } }
+```
+
+It is then subject to the same rules as `!/Stream`: the Channel MUST expose `!/Stop`, `!/Stop` MUST end it, and it counts as the Channel's one active command under section 7.7. A command that completes within the handling of its request MUST NOT set `status.command`, matching `!/Poll`.
+
+### 7.4 Output Format
 
 Channel output is always a **JSON array** of sample objects. The array MAY be empty (`[]`).
 
@@ -508,16 +647,16 @@ Timestamps are **relative to the start of the current stream** (or zero for a Po
 
 An empty array `[]` is a valid data message. It is published when a batch flush occurs with no samples in the buffer (a keepalive / idle window, or a stream-end flush of an empty buffer). `[]` is **not** an end-of-stream marker -- consumers detect stream end from `status.command` becoming `null` on About.
 
-### 7.4 Stream Parameters
+### 7.5 Stream Parameters
 
-The `!/Stream` request payload accepts these parameters. Omitted fields use the defaults below.
+These are the parameters `!/Stream` may accept. **Each is optional for the Channel to support.** A Channel advertises exactly the ones it implements in its `!/Stream` `payload_schema`; a parameter absent from that schema is not merely ignored but rejected, since `additionalProperties` defaults to `false` (section 4.6). Omitted fields in an otherwise-valid request use the defaults below.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `contents` | object \| boolean | `true` | Filter which keys to include in output data (see section 7.6). Omit or `true` for all; `{}` selects no keys. |
-| `sampleInterval` | number | `1.0` | Requested seconds between samples. `0` = sample as fast as the generator allows. |
-| `numSamples` | integer | `0` | Total samples to admit into batches. `0` = infinite, `n` = stop after n admitted samples. |
-| `batch` | object | see below | Flush limits for the open batch. Omitted `batch` (or omitted fields inside it) uses the field defaults. |
+| `contents` | object \| boolean | `true` | Filter which keys to include in output data (see section 7.8). Omit or `true` for all; `{}` selects no keys. |
+| `sampleInterval` | number | `1.0` | Minimum seconds between samples admitted to a batch. `0` = admit every sample the source offers. Binding when advertised; see below. |
+| `numSamples` | integer | `0` | Total samples to admit into batches. `0` = infinite, `n` = end the command after n admitted samples. |
+| `batch` | object | see below | Flush limits for the open batch. Omitted `batch`, or omitted fields inside it, uses the field defaults. |
 
 **`batch` object:**
 
@@ -526,7 +665,17 @@ The `!/Stream` request payload accepts these parameters. Omitted fields use the 
 | `maxInterval` | number | `300` | Max seconds an open batch may wait before it is published. `0` = no time limit (time-based flush disabled, including empty keepalives). |
 | `maxSamples` | integer | `1` | Max samples in one published message. `0` = no count limit. |
 
-`!/Poll` does not accept `sampleInterval`, `numSamples`, or `batch`. Poll is always one sample in one message.
+`!/Poll` accepts only `contents`, and only if the Channel supports it. Poll is always one sample in one message, so `sampleInterval`, `numSamples`, and `batch` are meaningless there and MUST NOT be advertised on it.
+
+#### `sampleInterval` is binding when advertised
+
+A Channel that advertises `sampleInterval` MUST honor it: between one admitted sample and the next, at least `sampleInterval` seconds MUST elapse. Samples offered sooner MUST be discarded, exactly as `contents`-trimmed empties are discarded (section 7.6) -- they do not enter the batch and do not count toward `batch.maxSamples` or `numSamples`.
+
+This is a change from A2.0, which described `sampleInterval` as a request the Channel could disregard. An advertised-but-unhonored parameter is worse than an absent one: a client asking for 1 Hz and receiving 1 kHz has no way to detect the discrepancy from About, and sizes its buffers wrongly. A Channel that cannot control its own sample cadence MUST omit the parameter instead, which tells the client to expect data at whatever rate the source produces it.
+
+Enforcement is a property of the Channel, not of any particular data source. Where a Channel pulls from a source it drives, honoring `sampleInterval` may amount to waiting between reads; where a Channel receives samples pushed by an application, honoring it means discarding those that arrive too soon. Both are the same rule.
+
+`sampleInterval` bounds the interval between admitted samples and nothing else. It does not bound publish cadence, which is governed independently by `batch` (section 7.6).
 
 Example -- high-rate DAQ, flush on count or time:
 
@@ -542,9 +691,9 @@ Example -- high-rate DAQ, flush on count or time:
 
 Up to 1000 samples per message, or a flush every 0.1 s, whichever happens first. If 0.1 s elapses with nothing in the buffer, the channel publishes `[]`.
 
-### 7.5 Batching
+### 7.6 Batching
 
-Sampling and batching are **separate operations**. A Stream maintains one **open batch** (a buffer of samples not yet published) and a **batch timer**. Implementations MUST honor the flush rules below even if the sample function is blocked or slow. How the runtime is scheduled -- SDK thread today, application event loop later -- is out of band; the operations and their triggers are not.
+Sampling and batching are **separate operations**. A Stream maintains one **open batch** (a buffer of samples not yet published) and a **batch timer**. Implementations MUST honor the flush rules below even if the data source is blocked or slow. How the runtime is scheduled -- an SDK-owned thread, an application event loop, a manual poll -- is out of band; the operations and their triggers are not.
 
 ```mermaid
 stateDiagram-v2
@@ -561,11 +710,20 @@ stateDiagram-v2
 
 | Operation | When | Effect |
 |-----------|------|--------|
-| **start_stream** | `!/Stream` accepted | Set `status.command`. Open an empty batch. Start the batch timer. Begin sampling at `sampleInterval`. |
-| **add_sample** | The sample function yields a value | Apply `contents` filtering. If the result is empty, **discard** the yield -- it does not enter the batch and does not count toward `batch.maxSamples` or `numSamples`. Otherwise append it with stream-relative `s`/`ns`. If `maxSamples > 0` and the buffer length is now `>= maxSamples`, **flush**. If `numSamples > 0` and admitted samples now equal `numSamples`, **end_stream**. |
-| **on_max_interval** | `maxInterval > 0` and that many seconds have elapsed since the timer started or last reset | **flush**, even if the buffer is empty. MUST fire independently of the sample function. |
+| **start_stream** | `!/Stream` accepted | Set `status.command`. Open an empty batch. Start the batch timer. Begin admitting samples. |
+| **add_sample** | The data source offers a sample | Apply the admission rules below. If the sample is discarded, it does not enter the batch and does not count toward `batch.maxSamples` or `numSamples`. Otherwise append it with stream-relative `s`/`ns`. If `maxSamples > 0` and the buffer length is now `>= maxSamples`, **flush**. If `numSamples > 0` and admitted samples now equal `numSamples`, **end_stream**. |
+| **on_max_interval** | `maxInterval > 0` and that many seconds have elapsed since the timer started or last reset | **flush**, even if the buffer is empty. MUST fire independently of the data source. |
 | **flush** | Any trigger above | Publish the buffer to `<` as a JSON array. If the buffer is empty, publish `[]`. Clear the buffer. If the stream is still active, restart the batch timer. The stream-end flush does not open a new batch. |
-| **end_stream** | `!/Stop`, `numSamples` reached, or the sample function finishes | **flush** once (including `[]` if the buffer is already empty). Set `status.command` to `null`. |
+| **end_stream** | `!/Stop`, `numSamples` reached, or the data source is exhausted | **flush** once (including `[]` if the buffer is already empty). Set `status.command` to `null`. |
+
+#### Admission rules
+
+`add_sample` applies these in order, and any of them may discard the offered sample:
+
+1. **Rate.** If the Channel advertises `sampleInterval` and fewer than `sampleInterval` seconds have elapsed since the last admitted sample, discard (section 7.5).
+2. **Filtering.** If the Channel advertises `contents` and the request supplied a value other than `true`, apply it. If the result is empty, discard (section 7.8).
+
+A discarded sample has no observable effect: it is not published, does not advance `numSamples`, does not fill the batch, and does not reset the rate gate. Only admitted samples update the "last admitted" instant used by rule 1.
 
 These operations on a given channel MUST be serialized: a sample is admitted to exactly one batch, and a flush publishes exactly the samples admitted since the previous flush. `add_sample` and `on_max_interval` must not interleave mid-operation.
 
@@ -592,13 +750,15 @@ Whichever limit is reached first flushes the current batch. If both would fire a
 
 `[]` is published whenever a flush runs against an empty buffer: an idle `maxInterval` window, or a final flush after the last count-based publish already emptied the buffer. A stream that ends with samples still buffered publishes those samples and does **not** send an extra trailing `[]`. Consumers MUST use About `status.command`, not `[]`, to detect that a stream has ended.
 
-#### Independence from the sample function
+#### Independence from the data source
 
-`on_max_interval` and `end_stream` (from `!/Stop`) MUST be able to **flush** while the sample function is blocked. `add_sample` is the only operation that depends on the generator. This keeps batching well-defined when publishing later moves to an application-owned event loop: the loop is responsible for invoking these operations on time; the channel definition only declares the rules.
+`on_max_interval` and `end_stream` (from `!/Stop`) MUST be able to **flush** while the data source is blocked or silent. `add_sample` is the only operation that depends on the source. This keeps batching well-defined regardless of who schedules the runtime: the scheduler is responsible for invoking these operations on time, and the Channel only declares the rules.
+
+An implementation MAY therefore express the `maxInterval` trigger as a **deadline** it exposes rather than a timer it owns, letting a thread, an event loop, or an application's own loop decide how to wait for it. That choice is invisible on the wire and does not affect conformance, provided the flush happens when the deadline passes.
 
 #### Worked examples
 
-**Default-like Stream** (`{}` or omitted `batch`): `sampleInterval=1.0`, `maxInterval=300`, `maxSamples=1`. Each admitted sample publishes immediately as a one-element array. `[]` appears only if nothing is admitted for 300 s (blocked generator, or every yield dropped by `contents`).
+**Default-like Stream** (`{}` or omitted `batch`): `sampleInterval=1.0`, `maxInterval=300`, `maxSamples=1`. Each admitted sample publishes immediately as a one-element array. `[]` appears only if nothing is admitted for 300 s (a silent source, or every sample dropped by `contents`).
 
 **High-rate DAQ** (`sampleInterval=0.001`, `maxInterval=0.1`, `maxSamples=1000`): a full batch of 1000 publishes as soon as it fills; otherwise the open batch publishes at 0.1 s. Silence for 0.1 s yields `[]`.
 
@@ -606,7 +766,27 @@ Whichever limit is reached first flushes the current batch. If both would fire a
 
 **`numSamples=5`, `maxSamples=10`:** five samples accumulate, then stream end flushes those five. No extra `[]`.
 
-### 7.6 The `contents` Filtering Mechanism
+### 7.7 Command Concurrency
+
+**At most one command may be active on a Channel at a time.** A command is active from the moment it sets `status.command` until that field returns to `null`. Commands that complete within the handling of their request, such as `!/Poll`, are never active in this sense and are not restricted by this rule.
+
+While a command is active, a Channel receiving a request that would start another long-running command MUST:
+
+- reject the new request,
+- leave the active command running and untouched,
+- leave `status.command` unchanged, so no About is published,
+- publish no data message, not even `[]`, and
+- SHOULD emit a Notice at `WARNING` (section 11).
+
+Rejection is silent on the command's own topics. In particular a rejected `!/Stream` produces no message on `<` and no `@/About`, despite `!/Stream` declaring `replyTopics: ["{serviceId}/@/About"]` -- that declaration describes the nominal flow, and a rejection is not the nominal flow.
+
+A client determines whether a Channel is busy by reading `status.command` in About, which is `null` when the Channel is idle and an object naming the active command otherwise. Because `!/Stream` publishes About when it starts and when it ends, a subscriber to `@/About` sees each transition.
+
+`!/Poll` on a busy Channel is a distinct case that this specification does not constrain: Poll does not compete for `status.command`, so a Channel MAY serve it concurrently with an active Stream, or MAY reject it as above. A Channel SHOULD document its behavior in the endpoint's `description`.
+
+**Design note -- one active command (chosen):** A single active command keeps `status.command` a scalar, keeps the batching rules of section 7.6 unambiguous about which batch a sample joins, and gives Stop an unambiguous target. The cost is that a Channel cannot serve two clients streaming at different rates or with different `contents` filters; the second client must wait, or the deployment must expose a second Channel. Fan-out to multiple concurrent Streams per Channel is deliberately excluded from A2.1 and may be revisited, which would require `status.command` to become a collection and Stop to identify its target.
+
+### 7.8 The `contents` Filtering Mechanism
 
 The `contents` parameter provides flexible control over what data is included in channel output and About responses. It operates recursively on the payload:
 
@@ -628,7 +808,7 @@ The `contents` parameter provides flexible control over what data is included in
 ```
 Select specific keys. Each key maps to its own `contents` rule (can nest dicts for deep structures). Keys set to `true` are always included; keys set to `false` use change-of-value. An empty nested rule such as `"channels": {}` keeps the `channels` key with an empty object value.
 
-On a Stream, `contents` is applied **before** a yield enters the open batch. A yield that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`. The same empty-object rule applies at the top level: a Stream with `"contents": {}` admits no samples.
+On a Stream, `contents` is applied **before** a sample enters the open batch. A sample that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`. The same empty-object rule applies at the top level: a Stream with `"contents": {}` admits no samples.
 
 **String mode (xxhash):**
 ```json
@@ -636,50 +816,56 @@ On a Stream, `contents` is applied **before** a yield enters the open batch. A y
 ```
 The string is interpreted as an xxh32 hex digest. The payload is hashed and compared. If it matches, nothing is returned (no change). If it differs, the new hash (or the full payload) is returned.
 
-### 7.7 The Sample Function
+### 7.9 Data Sources
 
-A Channel's data source is a **generator function** with the signature:
+Where a Channel's samples come from is an implementation concern, not a protocol one. The protocol defines only that samples reach the batch through `add_sample` (section 7.6) and that the Channel's advertised interface reflects what its source can actually do. Two arrangements are common, and both produce identical output on `<`.
+
+**Pulled.** The Channel drives its source, asking for a reading when it needs one. This is the natural fit for a sensor that can be read at any moment. Such a Channel can produce a sample on demand, so it may advertise `!/Poll`, and it can control its own cadence, so it may advertise `sampleInterval`.
+
+**Pushed.** The application offers samples to the Channel as they become available -- an event detector, a frame from a camera, a reading arriving over a serial link. The Channel calls `add_sample` with whatever it is given. When no command is active, offered samples are discarded; they are not published, and they do not accumulate.
+
+The two arrangements differ in advertised interface, not in wire behavior:
+
+| | Pulled | Pushed |
+|---|---|---|
+| `!/Poll` | MAY advertise | MUST NOT advertise, unless the Channel can satisfy a request at the moment it arrives (7.2) |
+| `sampleInterval` | MAY advertise | MAY advertise, and MUST then discard samples offered too soon (7.5) |
+| `<` payload | identical | identical |
+| `status.command` | identical | identical |
+
+Nothing prevents a Service from containing some Channels of each kind. A pushed Channel that also wishes to answer Poll must be able to produce a value synchronously, which in practice means holding a most-recent sample -- and it should only advertise `!/Poll` if serving a possibly-stale value is acceptable for that data, since Poll's `s` and `ns` are always `0` and carry no age information.
+
+**Timing independence.** The cadence at which samples are admitted and the cadence at which batches are published are independent. A slow or silent source delays `add_sample`; it MUST NOT delay `on_max_interval` or a Stop-driven `end_stream` (section 7.6).
+
+### 7.10 Python SDK Example
+
+**Pulled source, decorator style:**
 
 ```python
-def sample_function(request: InboundMessage, continue_sampling: Callable) -> Generator[dict, None, None]:
-    while continue_sampling(default_interval=1.0):
-        yield {"load": get_cpu_load()}
-```
-
-- `request` -- the original Poll or Stream message, including any parameters.
-- `continue_sampling(default_interval)` -- returns `True` if the Channel should keep sampling, `False` if a Stop was received or the stream has ended. The `default_interval` is the sleep used when the Stream payload omits `sampleInterval`. A present `sampleInterval` overrides it. `sampleInterval` (or the default) of `0` means no sleep -- sample as fast as the generator allows.
-- Each `yield` is offered to the batcher (`add_sample`). It is not published by itself. Publishing happens only on **flush** (see section 7.5).
-
-Sampling cadence (`sampleInterval`) and batch flush (`batch.maxInterval` / `batch.maxSamples`) are independent. A slow yield delays the next `add_sample`; it must not delay `on_max_interval` or a Stop-driven `end_stream`.
-
-### 7.8 Python SDK Example
-
-**Decorator style:**
-
-```python
-@service.new_channel(
+@service.channel(
     "cpuLoad",
     title="CPU Load",
-    description="Polls the CPU load",
+    description="CPU load of the host",
     output_data_schema={"load": {"type": "number", "unit": "%"}})
 def sample_cpu_load(request, continue_sampling):
     while continue_sampling(default_interval=0.5):
         yield {"load": psutil.cpu_percent(interval=0.1)}
 ```
 
-**Explicit style:**
+**Pushed source, driven by the application's own loop:**
 
 ```python
-channel = Channel(
-    id="memory",
-    service=service,
-    title="RAM Status",
-    description="RAM status of the system",
-    sample_function=sample_memory_status,
-    output_data_schema=MEMORY_SCHEMA)
+motion = service.channel(
+    "motion",
+    title="Motion Events",
+    description="Emits an event whenever motion is detected",
+    output_data_schema={"confidence": {"type": "number"}})
 
-service.add_channel(channel)
+# ... elsewhere, in the application's loop ...
+motion.add_sample({"confidence": 0.92})   # discarded unless a command is active
 ```
+
+The `motion` Channel advertises `!/Stream`, `!/Stop`, and `<`, but not `!/Poll`: motion cannot be produced on request.
 
 ---
 
@@ -711,7 +897,7 @@ A Node's About extends the base About with `services` and `child_nodes`:
     "id": "edgeNode01",
     "title": "Edge Node 01",
     "description": "Monitors sensors on floor 3.",
-    "lynx_version": "A2.0",
+    "lynx_version": "A2.1",
     "time_source": "unix"
   },
   "config": {},
@@ -779,7 +965,7 @@ node = Node(
     id="exampleNode",
     title="Example Node",
     description="Example Node for Lynx.",
-    lynx_version="A2.0")
+    lynx_version="A2.1")
 
 if __name__ == "__main__":
     node.start()
@@ -994,7 +1180,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "id": { "type": "string", "description": "Unique identifier of the Component." },
         "title": { "type": "string", "description": "Human-readable title." },
         "description": { "type": "string", "description": "Human-readable description." },
-        "lynx_version": { "type": "string", "enum": ["A2.0"], "description": "Lynx protocol version." },
+        "lynx_version": { "type": "string", "enum": ["A2.1"], "description": "Lynx protocol version." },
         "time_source": { "type": "string", "description": "Time source type (e.g., 'unix', 'process')." }
       }
     },
@@ -1003,11 +1189,14 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
       "description": "Mutable runtime configuration."
     },
     "status": {
+      "type": "object",
+      "properties": {
         "connected": {
-            "title": "Connected",
-            "description": "Whether the Service is connected to the Lynx network.",
-            "type": "boolean"
+          "title": "Connected",
+          "description": "Whether the Service is connected to the Lynx network.",
+          "type": "boolean"
         }
+      }
     },
     "endpoints": {
       "type": "object",
@@ -1017,7 +1206,14 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "properties": {
           "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
           "description": { "type": "string" },
-          "payload_schema": { "type": "object" },
+          "payload_schema": {
+            "type": "object",
+            "description": "Complete Draft-7 schema object. Must be the schema the component enforces."
+          },
+          "additionalProperties": {
+            "type": "boolean",
+            "description": "Mirrors payload_schema's top-level additionalProperties. Required when payload_schema is present."
+          },
           "replyTopics": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
@@ -1044,7 +1240,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
             "id": { "type": "string" },
             "title": { "type": "string" },
             "description": { "type": "string" },
-            "lynx_version": { "type": "string", "enum": ["A2.0"] }
+            "lynx_version": { "type": "string", "enum": ["A2.1"] }
           }
         },
         "config": { "type": "object" },
@@ -1074,7 +1270,14 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
             "properties": {
               "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
               "description": { "type": "string" },
-              "payload_schema": { "type": "object" },
+              "payload_schema": {
+                "type": "object",
+                "description": "Complete Draft-7 schema object. Must be the schema the channel enforces."
+              },
+              "additionalProperties": {
+                "type": "boolean",
+                "description": "Mirrors payload_schema's top-level additionalProperties. Required when payload_schema is present."
+              },
               "replyTopics": {
                 "type": "array",
                 "items": { "type": "string", "minLength": 1 },
@@ -1110,16 +1313,19 @@ Extends the Service About schema with `services` and `child_nodes`:
         "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "lynx_version": { "type": "string", "enum": ["A2.0"] },
+        "lynx_version": { "type": "string", "enum": ["A2.1"] },
         "time_source": { "type": "string" }
       }
     },
     "config": { "type": "object" },
     "status": {
-      "connected": {
-        "title": "Connected",
-        "description": "Whether the Node is connected to the Lynx network.",
-        "type": "boolean"
+      "type": "object",
+      "properties": {
+        "connected": {
+          "title": "Connected",
+          "description": "Whether the Node is connected to the Lynx network.",
+          "type": "boolean"
+        }
       }
     },
     "endpoints": {
@@ -1130,7 +1336,14 @@ Extends the Service About schema with `services` and `child_nodes`:
         "properties": {
           "endpoint_direction": { "type": "string", "enum": ["sub", "pub", "pubsub"] },
           "description": { "type": "string" },
-          "payload_schema": { "type": "object" },
+          "payload_schema": {
+            "type": "object",
+            "description": "Complete Draft-7 schema object. Must be the schema the component enforces."
+          },
+          "additionalProperties": {
+            "type": "boolean",
+            "description": "Mirrors payload_schema's top-level additionalProperties. Required when payload_schema is present."
+          },
           "replyTopics": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
@@ -1175,11 +1388,14 @@ Extends the Service About schema with `services` and `child_nodes`:
       "type": "object",
       "description": "Additional structured data."
     }
-  }
+  },
+  "additionalProperties": false
 }
 ```
 
 ### A.4 Poll Request (`!/Poll`)
+
+This is the schema for a Channel that supports `contents` filtering. A Channel that does not support a given feature omits the corresponding property; see section 7.5.
 
 ```json
 {
@@ -1191,11 +1407,14 @@ Extends the Service About schema with `services` and `child_nodes`:
       "default": true,
       "description": "Filter which keys to include in output data. Omit or true for the full payload; {} selects no keys."
     }
-  }
+  },
+  "additionalProperties": false
 }
 ```
 
 ### A.5 Stream Request (`!/Stream`)
+
+This is the schema for a Channel supporting every parameter defined in section 7.5. Each `properties` entry is independently optional for a Channel to advertise; a Channel omits the ones it does not implement, and `additionalProperties: false` then causes requests using them to be rejected.
 
 ```json
 {
@@ -1205,19 +1424,19 @@ Extends the Service About schema with `services` and `child_nodes`:
     "contents": {
       "type": ["object", "boolean"],
       "default": true,
-      "description": "Filter which keys to include in output data. Applied before a yield enters the open batch. Omit or true for the full payload; {} selects no keys (trimmed yields are discarded)."
+      "description": "Filter which keys to include in output data. Applied before a sample enters the open batch. Omit or true for the full payload; {} selects no keys (trimmed samples are discarded)."
     },
     "sampleInterval": {
       "type": "number",
       "default": 1.0,
       "minimum": 0,
-      "description": "Requested seconds between samples. 0 = as fast as the generator allows."
+      "description": "Minimum seconds between admitted samples. Binding when advertised: samples offered sooner are discarded. 0 = admit every sample the source offers."
     },
     "numSamples": {
       "type": "integer",
       "default": 0,
       "minimum": 0,
-      "description": "Total samples to admit into batches. 0 = infinite. Counts only yields that enter the batch after contents filtering."
+      "description": "Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering."
     },
     "batch": {
       "type": "object",
@@ -1238,7 +1457,8 @@ Extends the Service About schema with `services` and `child_nodes`:
         }
       }
     }
-  }
+  },
+  "additionalProperties": false
 }
 ```
 
@@ -1249,9 +1469,12 @@ Extends the Service About schema with `services` and `child_nodes`:
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {},
-  "description": "Empty payload. Signals the channel to stop."
+  "additionalProperties": false,
+  "description": "Empty payload. Signals the channel to stop its active command."
 }
 ```
+
+`additionalProperties: false` with an empty `properties` map is what makes this "empty object only". Publishing `{}` here would advertise the opposite -- an empty schema accepts any payload.
 
 ### A.7 Channel Output (`<`)
 
@@ -1288,4 +1511,17 @@ Extends the Service About schema with `services` and `child_nodes`:
 | Version | Status | Notes |
 |---------|--------|-------|
 | `A1.0` | Superseded | Initial protocol version. Defined Services, Channels, Nodes, About, Notice, contents filtering, and the topic naming conventions. Stream used `interval` and `paginate`. |
-| `A2.0` | Current | `replyTopics` and `dataOutput` on endpoint About metadata. Stream command: `interval`/`paginate` replaced by `sampleInterval` and `batch` (`maxInterval`, `maxSamples`). Batching is a discrete, sampling-independent set of operations; empty `[]` data messages are valid. Sample timestamps are stream-relative and do not reset per batch. |
+| `A2.0` | Superseded | `replyTopics` and `dataOutput` on endpoint About metadata. Stream command: `interval`/`paginate` replaced by `sampleInterval` and `batch` (`maxInterval`, `maxSamples`). Batching is a discrete, sampling-independent set of operations; empty `[]` data messages are valid. Sample timestamps are stream-relative and do not reset per batch. |
+| `A2.1` | Current | Channel interfaces are composed rather than fixed (see below). |
+
+### A2.1 breaking changes
+
+Three A2.0 guarantees are withdrawn. Consumers written against A2.0 may require changes.
+
+**1. Channel endpoints are conditional.** A2.0 guaranteed that every Channel exposed `!/Poll`, `!/Stream`, `!/Stop`, and `<`. A2.1 derives a Channel's endpoint set from its declared capabilities, so any of the command endpoints may be absent, and Channels may declare additional commands beyond the three built-ins. Consumers MUST read About rather than assuming a fixed endpoint set (sections 7.1, 7.2).
+
+**2. `payload_schema` has a canonical form.** A2.0 described `payload_schema` as a Draft-7 schema but did not require it, and implementations published bare property maps. A Draft-7 validator reads such a map as an empty schema and accepts any payload, so advertised and enforced contracts could differ. A2.1 requires a complete Draft-7 schema object and requires that it be the schema the component actually enforces (section 4.6).
+
+**3. `sampleInterval` is optional and binding.** In A2.0 `sampleInterval` was always advertised on `!/Stream` and described as a request the Channel need not honor. In A2.1 it is advertised only by Channels that support it, and advertising it obliges the Channel to honor it (section 7.5).
+
+Additions that are not breaking: user-defined Channel commands (section 7.3), the explicit one-active-command-per-Channel rule (section 7.7), the interface stability rule (section 4.7), and `additionalProperties` in published endpoint metadata (section 4.6).
