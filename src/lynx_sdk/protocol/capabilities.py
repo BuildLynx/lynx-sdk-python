@@ -170,7 +170,7 @@ def stop_command() -> ChannelCommand:
     )
 
 
-def data_output_command_args(output_data_properties: Optional[Dict] = None) -> Dict:
+def data_output_endpoint_args(output_data_properties: Optional[Dict] = None) -> Dict:
     return build_channel_out_data_endpoint_args(output_data_properties)
 
 

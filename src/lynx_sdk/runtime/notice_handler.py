@@ -9,6 +9,7 @@ import logging
 
 from lynx_sdk.messaging.endpoint import OutEndpoint
 from lynx_sdk.protocol.notice import Notice, NoticeSeverity
+from lynx_sdk.protocol.time_units import NS_PER_S
 
 
 class LoggingNoticeHandler(logging.Handler):
@@ -32,5 +33,5 @@ class LoggingNoticeHandler(logging.Handler):
         """Override logging.Handler.emit to publish a Notice on the notice endpoint."""
         notice: Notice = self.notice_from_record(record)
         sec: int = int(record.created)
-        nsec: int = int((record.created - sec) * 1e9)
+        nsec: int = int((record.created - sec) * NS_PER_S)
         self.endpoint.publish(payload=notice.__dict__, properties={"s": str(sec), "ns": str(nsec)})

@@ -641,7 +641,7 @@ Channel output is always a **JSON array** of sample objects. The array MAY be em
 |-------|------|-------------|
 | `s` | integer | Seconds elapsed since the start of the current stream/poll |
 | `ns` | integer | Nanoseconds remainder (0 to 999,999,999) |
-| `data` | object | The sample data, validated against the channel's `output_data_schema` |
+| `data` | object | The sample data, validated against the channel's `output_data_properties` |
 
 Timestamps are **relative to the start of the current stream** (or zero for a Poll), measured via a high-resolution performance counter. They do **not** reset when a batch is published -- every sample in every batch of a stream shares the same origin (see section 9.2).
 
@@ -846,7 +846,7 @@ Nothing prevents a Service from containing some Channels of each kind. A pushed 
     "cpuLoad",
     title="CPU Load",
     description="CPU load of the host",
-    output_data_schema={"load": {"type": "number", "unit": "%"}})
+    output_data_properties={"load": {"type": "number", "unit": "%"}})
 def sample_cpu_load(request, continue_sampling):
     while continue_sampling(default_interval=0.5):
         yield {"load": psutil.cpu_percent(interval=0.1)}
@@ -859,7 +859,7 @@ motion = service.channel(
     "motion",
     title="Motion Events",
     description="Emits an event whenever motion is detected",
-    output_data_schema={"confidence": {"type": "number"}})
+    output_data_properties={"confidence": {"type": "number"}})
 
 # ... elsewhere, in the application's loop ...
 motion.add_sample({"confidence": 0.92})   # discarded unless a command is active

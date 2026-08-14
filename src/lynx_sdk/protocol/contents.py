@@ -9,24 +9,26 @@ import xxhash
 import orjson
 
 
-def make_mock_payload(model_payload: Any, mock_value: Any = None) -> Any:
+def blank_payload_like(model_payload: Any, leaf_value: Any = None) -> Any:
     """
-    Make a mock payload from a model payload.
+    Build a same-shaped payload with every leaf replaced by leaf_value.
+
+    Used as a change-detection baseline for contents filtering, not as a test double.
     """
     if isinstance(model_payload, Dict):
         mock_payload = {}
         for key in model_payload.keys():
             if isinstance(model_payload[key], Dict):
-                mock_payload[key] = make_mock_payload(model_payload[key])
+                mock_payload[key] = blank_payload_like(model_payload[key])
             elif isinstance(model_payload[key], List):
-                mock_payload[key] = [make_mock_payload(item) for item in model_payload[key]]
+                mock_payload[key] = [blank_payload_like(item) for item in model_payload[key]]
             else:
-                mock_payload[key] = mock_value
+                mock_payload[key] = leaf_value
         return mock_payload
     elif isinstance(model_payload, List):
-        return [make_mock_payload(item) for item in model_payload]
+        return [blank_payload_like(item) for item in model_payload]
     else:
-        return mock_value
+        return leaf_value
 
 
 def trim_payload_by_contents(
@@ -37,7 +39,7 @@ def trim_payload_by_contents(
     Recursively build a JSON dict by trimming a superset dict by a dict of keys to contents.
     """
     if old_payload is None:
-        old_payload = make_mock_payload(payload)
+        old_payload = blank_payload_like(payload)
     try:
         if contents is True:
             return payload

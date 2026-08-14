@@ -5,13 +5,14 @@ TimeSource class for Lynx. A TimeSource is the encapsulation of a single time so
 Generative AI was used in the Creation/Modification of this file.
 """
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 import time
 from enum import Enum
 
+from lynx_sdk.protocol.time_units import NS_PER_S
+
 
 EPOCH_DELTA_1970_TO_2000 = 946684800   # 30 years incl leap days
-NSEC_PER_SEC = int(1e9)
 
 
 class TimeSourceType(Enum):
@@ -20,38 +21,46 @@ class TimeSourceType(Enum):
 
 
 class TimeSource():
-    def __init__(self,
-        get_time_function: Callable,
-        time_source_type: TimeSourceType):
+    def __init__(
+        self,
+        time_source_type: TimeSourceType,
+        get_time_function: Optional[Callable[[], Dict[str, int]]] = None):
         """
         Initialize a TimeSource object.
+
+        Subclasses override get_time(). A custom callable may be supplied instead.
         """
-        self.get_time: Callable = get_time_function
         self.time_source_type: TimeSourceType = time_source_type
+        self._get_time_function = get_time_function
+
+    def get_time(self) -> Dict[str, int]:
+        if self._get_time_function is not None:
+            return self._get_time_function()
+        raise NotImplementedError
 
 
 class ProcessPerfTimeSource(TimeSource):
     def __init__(self):
         self._start_time: float = time.perf_counter_ns()
-        super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.PROCESS)
+        super().__init__(time_source_type=TimeSourceType.PROCESS)
 
-    def get_time(self) -> Dict[int, int]:
+    def get_time(self) -> Dict[str, int]:
         current_time = time.perf_counter_ns()-self._start_time
         return {
-            "s": current_time // NSEC_PER_SEC,
-            "ns": current_time % NSEC_PER_SEC
+            "s": current_time // NS_PER_S,
+            "ns": current_time % NS_PER_S
         }
 
 
 class UnixTimeSource(TimeSource):
     def __init__(self):
-        super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.UNIX)
+        super().__init__(time_source_type=TimeSourceType.UNIX)
 
-    def get_time(self) -> Dict[int, int]:
+    def get_time(self) -> Dict[str, int]:
         current_time = time.time_ns()
         return {
-            "s": current_time // NSEC_PER_SEC,
-            "ns": current_time % NSEC_PER_SEC
+            "s": current_time // NS_PER_S,
+            "ns": current_time % NS_PER_S
         }
 
 
@@ -61,13 +70,13 @@ class Epoch2000TimeSource(TimeSource):
     https://docs.micropython.org/en/latest/library/time.html
     """
     def __init__(self):
-        super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.UNIX)
+        super().__init__(time_source_type=TimeSourceType.UNIX)
 
-    def get_time(self) -> Dict[int, int]:
+    def get_time(self) -> Dict[str, int]:
         current_time = time.time_ns()
         return {
-            "s": (current_time // NSEC_PER_SEC) + EPOCH_DELTA_1970_TO_2000,
-            "ns": current_time % NSEC_PER_SEC
+            "s": (current_time // NS_PER_S) + EPOCH_DELTA_1970_TO_2000,
+            "ns": current_time % NS_PER_S
         }
 
 

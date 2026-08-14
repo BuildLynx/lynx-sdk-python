@@ -121,7 +121,7 @@ class InEndpoint(Endpoint):
     def data_output(self) -> Optional[bool]:
         return self.spec.data_output
 
-    def callback(self, mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
+    def callback(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> Optional[Any]:
         """
         Handle an incoming MQTT message by parsing JSON bytes and calling the handler.
         """

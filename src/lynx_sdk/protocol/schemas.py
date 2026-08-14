@@ -286,7 +286,7 @@ def build_channel_data_schema(output_data_properties: Optional[Dict] = None) -> 
         ]
         if non_schema_keys:
             raise SchemaDefinitionError(
-                f"output_data_schema is a map of property name to subschema, but "
+                f"output_data_properties is a map of property name to subschema, but "
                 f"{non_schema_keys} map to values that are not subschemas. "
                 f"Pass {{\"load\": {{\"type\": \"number\"}}}}, not "
                 f"{{\"type\": \"object\", \"properties\": {{...}}}}."

@@ -26,6 +26,7 @@ from lynx_sdk.protocol.schemas import (
     SUBSCRIBE_ABOUT_ENDPOINT_ARGS,
     SYS_NOTICE_ENDPOINT_ARGS,
 )
+from lynx_sdk.protocol.time_units import NS_PER_S
 from lynx_sdk.runtime.broker_config import resolve_broker_socket
 from lynx_sdk.runtime.logging_setup import configure_logger
 from lynx_sdk.runtime.network_state import NetworkState
@@ -140,7 +141,7 @@ class ClientComponent(Component):
         self.set_status(connected=False)
         self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
 
-    def service_deadlines(self) -> None:
+    def flush_due_deadlines(self) -> None:
         """Flush any due protocol deadlines. Services override this to pump Channels."""
         return
 
@@ -150,13 +151,13 @@ class ClientComponent(Component):
 
     def pump(self, timeout: float = 0.1) -> None:
         """
-        Process MQTT traffic once and service protocol deadlines.
+        Process MQTT traffic once and flush due protocol deadlines.
 
         This is the single-threaded / user-owned loop entry point (loop="pumped").
         Command handlers run on the thread that calls pump().
         """
         self.mqtt_client.loop(timeout=timeout)
-        self.service_deadlines()
+        self.flush_due_deadlines()
 
     def _connect_with_retry(self) -> None:
         self.mqtt_client.set_on_message(self.no_endpoint_message)
@@ -182,9 +183,9 @@ class ClientComponent(Component):
             if deadline is None:
                 time.sleep(DEADLINE_SLEEP_CAP_S)
             else:
-                remaining = (deadline - time.perf_counter_ns()) / 1_000_000_000
+                remaining = (deadline - time.perf_counter_ns()) / NS_PER_S
                 time.sleep(max(0.0, min(remaining, DEADLINE_SLEEP_CAP_S)))
-            self.service_deadlines()
+            self.flush_due_deadlines()
 
     def start(self, infinite_loop: bool = True, loop: str = "thread"):
         """

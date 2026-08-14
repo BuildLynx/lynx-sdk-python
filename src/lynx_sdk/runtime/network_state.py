@@ -42,17 +42,17 @@ class NetworkState():
         Returns:
             True if any part of the path was created, False otherwise.
         """
-        id = path[0][0]
+        component_id = path[0][0]
         component_type = path[0][1]
         if component_type == ComponentType.SERVICE:
-            if id not in state_scope["services"]:
-                state_scope["services"][id] = final_payload
-            state_scope["services"][id] = deep_merge(state_scope["services"][id], final_payload, make_copy=False)
+            if component_id not in state_scope["services"]:
+                state_scope["services"][component_id] = final_payload
+            state_scope["services"][component_id] = deep_merge(state_scope["services"][component_id], final_payload, make_copy=False)
         elif component_type == ComponentType.NODE:
-            if id not in state_scope["childNodes"]:
-                state_scope["childNodes"][id] = self.generate_empty_node_state()
+            if component_id not in state_scope["childNodes"]:
+                state_scope["childNodes"][component_id] = self.generate_empty_node_state()
             if len(path) == 1:
-                state_scope["childNodes"][id] = deep_merge(state_scope["childNodes"][id], final_payload, make_copy=False)
+                state_scope["childNodes"][component_id] = deep_merge(state_scope["childNodes"][component_id], final_payload, make_copy=False)
             else:
                 self.recursively_set_path(path[1:], state_scope["childNodes"][id], final_payload)
         else:

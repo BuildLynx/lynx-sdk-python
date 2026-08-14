@@ -22,7 +22,7 @@ service = Service(
     "cpuLoad",
     title="CPU Load",
     description="Polls the CPU load",
-    output_data_schema={"load": {"type": "number", "unit": "%", "minimum": 0, "maximum": 100}})
+    output_data_properties={"load": {"type": "number", "unit": "%", "minimum": 0, "maximum": 100}})
 def sample_cpu_load(request: InboundMessage, continue_sampling: Callable):
     while continue_sampling(default_interval=0.5):
         yield {"load": psutil.cpu_percent(interval=0.1)}
@@ -78,7 +78,7 @@ memory_channel = Channel(
     title="RAM Status",
     description="RAM status of the system",
     sample_function=sample_memory_status,
-    output_data_schema=MEMORY_CHANNEL_DATA_SCHEMA)
+    output_data_properties=MEMORY_CHANNEL_DATA_SCHEMA)
 
 
 service.add_channel(memory_channel)
@@ -111,7 +111,7 @@ second_channel = Channel(
     service=service,
     title="Second Alert",
     description="Simulated alert: emits once per wall-clock second.",
-    output_data_schema=SECOND_CHANNEL_DATA_SCHEMA,
+    output_data_properties=SECOND_CHANNEL_DATA_SCHEMA,
     config={"streamOnStartup": False})
 
 service.add_channel(second_channel)
@@ -152,7 +152,7 @@ service.add_channel(Channel(
     service=service,
     title="Random Number",
     description="Emit a random integer between 1 and 3",
-    output_data_schema=RANDOM_NUMBER_CHANNEL_DATA_SCHEMA,
+    output_data_properties=RANDOM_NUMBER_CHANNEL_DATA_SCHEMA,
     sample_function=random_number_stream,
     config={"streamOnStartup": False}))
 

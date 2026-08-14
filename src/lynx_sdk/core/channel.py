@@ -4,9 +4,9 @@ Channel class for Lynx. A Channel is the encapsulation of a single input and/or 
 Generative AI was used in the Creation/Modification of this file.
 
 The advertised command set is composed from capabilities (A2.1 section 7.1).
-Long-running command concurrency lives in CommandMachine; batching and the
-sampleInterval gate live in StreamBatcher. This class binds those to MQTT and,
-for pulled sources, an optional sample thread.
+Long-running command concurrency lives in ActiveCommand; admission, batching,
+and the sampleInterval gate live in ActiveStream. This class binds those to
+MQTT and, for pulled sources, an optional sample thread.
 """
 
 from __future__ import annotations
@@ -22,18 +22,18 @@ from lynx_sdk.protocol.capabilities import (
     ChannelCommand,
     CapabilityError,
     compose_channel_commands,
-    data_output_command_args,
+    data_output_endpoint_args,
     stop_command,
     validate_action_name,
 )
 from lynx_sdk.protocol.component_type import ComponentType
 from lynx_sdk.protocol.contents import trim_payload_by_contents, PayloadBuildingError
 from lynx_sdk.protocol.version import LYNX_VERSION
-from lynx_sdk.runtime.command_machine import CommandMachine
-from lynx_sdk.runtime.stream_batcher import (
-    StreamBatcher,
-    DEFAULT_NUM_SAMPLES,
+from lynx_sdk.runtime.active_command import ActiveCommand
+from lynx_sdk.runtime.active_stream import (
+    ActiveStream,
     DEFAULT_SAMPLE_INTERVAL,
+    DEFAULT_TOTAL_SAMPLE_LIMIT,
     resolve_batch_limits,
 )
 
@@ -48,7 +48,7 @@ class Channel(Component):
         sample_function: Optional[Callable] = None,
         title: str = "",
         description: str = "",
-        output_data_schema: Optional[Dict] = None,
+        output_data_properties: Optional[Dict] = None,
         config: Optional[Dict[str, Any]] = None,
         enable_poll: Optional[bool] = None,
         enable_stream: bool = True,
@@ -68,7 +68,7 @@ class Channel(Component):
                 add_sample().
             title: Human-readable title
             description: Human-readable description
-            output_data_schema: Map of property name to subschema for the channel's data.
+            output_data_properties: Map of property name to subschema for the channel's data.
             config: Configuration for the channel
             enable_poll: Advertise !/Poll. Defaults to True iff sample_function is set.
             enable_stream: Advertise !/Stream (and !/Stop). Default True.
@@ -95,9 +95,9 @@ class Channel(Component):
         self.service: Service = service
         self._sample_function: Optional[Callable] = sample_function
         self._exit_flag: threading.Event = threading.Event()
-        self._stream_batcher: Optional[StreamBatcher] = None
+        self._active_stream: Optional[ActiveStream] = None
         self._stream_thread: Optional[threading.Thread] = None
-        self._command_machine = CommandMachine()
+        self._active_command = ActiveCommand()
 
         pulled = sample_function is not None
         self._commands: list[ChannelCommand] = compose_channel_commands(
@@ -130,7 +130,7 @@ class Channel(Component):
         produces_data = any(c.data_output for c in self._commands)
         if produces_data:
             self.out_data_endpoint: Optional[OutEndpoint] = self.new_out_endpoint(
-                **data_output_command_args(output_data_schema))
+                **data_output_endpoint_args(output_data_properties))
         else:
             self.out_data_endpoint = None
 
@@ -152,11 +152,11 @@ class Channel(Component):
             action = command.action
 
             def long_running_handler(msg: InboundMessage):
-                if not self._command_machine.try_begin(action, msg.payload):
+                if not self._active_command.try_begin(action, msg.payload):
                     self.logger.warning(
                         f"Channel '{self.id}' is busy, ignoring {action} request.")
                     return
-                self.set_status(command=self._command_machine.active)
+                self.set_status(command=self._active_command.snapshot())
                 return user_handler(msg)
 
             return long_running_handler
@@ -210,22 +210,23 @@ class Channel(Component):
         Offer a sample to the active stream.
 
         Discarded when no stream is active. When sampleInterval is advertised,
-        samples offered too soon are also discarded by the batcher.
+        samples offered too soon are also discarded. The return value is whether
+        the stream is still open, not whether the sample was admitted.
         """
-        batcher = self._stream_batcher
-        if batcher is None:
+        active_stream = self._active_stream
+        if active_stream is None:
             return False
-        return batcher.add_sample(data)
+        return active_stream.add_sample(data)
 
-    def service_batcher(self, now_ns: Optional[int] = None) -> None:
+    def flush_if_due(self, now_ns: Optional[int] = None) -> None:
         """Let a scheduler flush the open batch if its deadline has passed."""
-        if self._stream_batcher is not None:
-            self._stream_batcher.service(now_ns)
+        if self._active_stream is not None:
+            self._active_stream.flush_if_due(now_ns)
 
     def flush_deadline_ns(self) -> Optional[int]:
-        if self._stream_batcher is None:
+        if self._active_stream is None:
             return None
-        return self._stream_batcher.flush_deadline_ns()
+        return self._active_stream.flush_deadline_ns()
 
     def poll_handler(self, msg: InboundMessage):
         """Handle a poll request: one sample, no status.command change."""
@@ -246,37 +247,37 @@ class Channel(Component):
 
     def start_stream_handler(self, msg: InboundMessage):
         """Handle a stream start request."""
-        if not self._command_machine.try_begin("Stream", msg.payload):
+        if not self._active_command.try_begin("Stream", msg.payload):
             self.logger.warning(
                 f"Channel '{self.id}' is already running a command, ignoring stream start request.")
             return
 
         payload = msg.payload
         contents = payload.get("contents", True)
-        num_samples = int(payload.get("numSamples", DEFAULT_NUM_SAMPLES))
-        max_interval, max_samples = resolve_batch_limits(payload)
+        total_sample_limit = int(payload.get("numSamples", DEFAULT_TOTAL_SAMPLE_LIMIT))
+        limits = resolve_batch_limits(payload)
         sample_interval: Optional[float] = None
         if self._honors_sample_interval:
             sample_interval = float(payload.get("sampleInterval", DEFAULT_SAMPLE_INTERVAL))
 
         self._exit_flag.clear()
-        self.set_status(command=self._command_machine.active)
-        batcher = StreamBatcher(
+        self.set_status(command=self._active_command.snapshot())
+        active_stream = ActiveStream(
             contents=contents,
-            max_interval=max_interval,
-            max_samples=max_samples,
-            num_samples=num_samples,
+            max_interval=limits.max_interval,
+            batch_size_limit=limits.batch_size_limit,
+            total_sample_limit=total_sample_limit,
             publish=self._publish_data,
             logger=self.logger,
             on_ended=self._on_stream_ended,
             sample_interval=sample_interval)
-        batcher.start()
-        self._stream_batcher = batcher
+        active_stream.start_stream()
+        self._active_stream = active_stream
 
         if self._sample_function is not None:
             stream_thread = threading.Thread(
                 target=self._stream_handler,
-                kwargs={"request": msg, "batcher": batcher},
+                kwargs={"request": msg, "active_stream": active_stream},
                 daemon=True)
             self._stream_thread = stream_thread
             stream_thread.start()
@@ -288,10 +289,10 @@ class Channel(Component):
 
     def _on_stream_ended(self):
         self._exit_flag.set()
-        self._command_machine.end()
+        self._active_command.end()
         self.set_status(command=None)
 
-    def _stream_handler(self, request: InboundMessage, batcher: StreamBatcher):
+    def _stream_handler(self, request: InboundMessage, active_stream: ActiveStream):
         def continue_sampling(default_interval: float = DEFAULT_SAMPLE_INTERVAL):
             if self._honors_sample_interval:
                 interval = request.payload.get("sampleInterval", default_interval)
@@ -303,18 +304,18 @@ class Channel(Component):
             for data in self._sample_function(request=request, continue_sampling=continue_sampling):
                 if self._exit_flag.is_set():
                     break
-                if not batcher.add_sample(data):
+                if not active_stream.add_sample(data):
                     break
         finally:
-            batcher.end_stream()
+            active_stream.end_stream()
 
     def stop_handler(self, msg: InboundMessage):
         """Stop the active command. No-op when idle; produces no data message then."""
         self._exit_flag.set()
-        if self._stream_batcher is not None:
-            self._stream_batcher.end_stream()
+        if self._active_stream is not None:
+            self._active_stream.end_stream()
             return
-        if self._command_machine.end():
+        if self._active_command.end():
             self.set_status(command=None)
 
     def produce_about(self) -> Dict:

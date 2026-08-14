@@ -50,10 +50,10 @@ class Service(ClientComponent):
         for channel in self.channels.values():
             channel.freeze_interface()
 
-    def service_deadlines(self) -> None:
+    def flush_due_deadlines(self) -> None:
         now_ns = time.perf_counter_ns()
         for channel in self.channels.values():
-            channel.service_batcher(now_ns)
+            channel.flush_if_due(now_ns)
 
     def soonest_deadline_ns(self) -> Optional[int]:
         soonest: Optional[int] = None
@@ -70,7 +70,7 @@ class Service(ClientComponent):
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Optional[Dict] = None,
+        output_data_properties: Optional[Dict] = None,
         sample_function: Optional[Callable] = None,
         config: Optional[Dict] = None,
         enable_poll: Optional[bool] = None,
@@ -91,7 +91,7 @@ class Service(ClientComponent):
             title=title,
             description=description,
             sample_function=sample_function,
-            output_data_schema=output_data_schema,
+            output_data_properties=output_data_properties,
             config=config,
             enable_poll=enable_poll,
             enable_stream=enable_stream,
@@ -107,7 +107,7 @@ class Service(ClientComponent):
         id: str,
         title: str = "",
         description: str = "",
-        output_data_schema: Optional[Dict] = None,
+        output_data_properties: Optional[Dict] = None,
         enable_poll: Optional[bool] = None,
         enable_stream: bool = True,
         enable_sample_interval: Optional[bool] = None,
@@ -121,7 +121,7 @@ class Service(ClientComponent):
                 id=id,
                 title=title,
                 description=description,
-                output_data_schema=output_data_schema,
+                output_data_properties=output_data_properties,
                 sample_function=sample_function,
                 enable_poll=enable_poll,
                 enable_stream=enable_stream,
