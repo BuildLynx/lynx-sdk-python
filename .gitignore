@@ -19,3 +19,4 @@ build/
 .VSCodeCounter/
 .noncui
 .cursor/
+.tmp-lifecycle/

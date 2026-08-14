@@ -5,7 +5,7 @@ Generative AI was used in the Creation/Modification of this file.
 
 Each command and each Stream field is a unit so the advertised interface and
 the implementing behavior cannot drift. A Channel composes a set of these at
-construction; after the first About publish the set is frozen.
+interface freeze; after the first About publish the set is frozen.
 """
 
 from dataclasses import dataclass, field
@@ -200,7 +200,7 @@ def compose_channel_commands(
     Build the command list for a Channel from capability flags.
 
     Invariants (A2.1 section 7.1) are checked here so an invalid composition
-    fails at construction rather than advertising an unsatisfiable interface.
+    fails at interface freeze rather than advertising an unsatisfiable interface.
     """
     commands: List[ChannelCommand] = []
     include_poll = enable_poll if enable_poll is not None else pulled

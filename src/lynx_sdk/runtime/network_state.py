@@ -54,9 +54,25 @@ class NetworkState():
             if len(path) == 1:
                 state_scope["childNodes"][component_id] = deep_merge(state_scope["childNodes"][component_id], final_payload, make_copy=False)
             else:
-                self.recursively_set_path(path[1:], state_scope["childNodes"][id], final_payload)
+                self.recursively_set_path(path[1:], state_scope["childNodes"][component_id], final_payload)
         else:
             raise ValueError(f"Invalid component type: {component_type}")
+
+    def _classify_about(self, payload: Dict[str, Any]) -> str:
+        """
+        Place an About payload as Service or Node.
+
+        lynxType is authoritative. A Node About contains both services and
+        childNodes, so key sniffing is only used when lynxType is absent.
+        """
+        lynx_type = payload.get("lynxType")
+        if lynx_type in (ComponentType.SERVICE.value, ComponentType.NODE.value):
+            return lynx_type
+        if "channels" in payload:
+            return ComponentType.SERVICE.value
+        if "childNodes" in payload:
+            return ComponentType.NODE.value
+        raise ValueError(f"Invalid Lynx type: {lynx_type}. Payload: {payload}")
 
     def update_from_about_message(self, msg: InboundMessage):
         """
@@ -70,20 +86,16 @@ class NetworkState():
             [(component_id, ComponentType.NODE) for component_id in component_path_list[:-1]]
 
         # Partial About: payload contains only mutable fields (e.g. LWT {"status":{"connected":false}}).
-        # Merge onto the service entry only; leave channel status.command untouched.
+        # Merge onto the existing Service or Node entry; leave channel status.command untouched.
         if msg.payload.keys() <= PARTIAL_ABOUT_KEYS:
             if msg.payload and len(component_path_list) >= 1:
-                service_id = component_path_list[-1]
-                service_entry = self.state.get("services", {}).get(service_id)
-                if service_entry is not None:
-                    deep_merge(service_entry, msg.payload, make_copy=False)
+                component_id = component_path_list[-1]
+                entry = self.state.get("services", {}).get(component_id)
+                if entry is None:
+                    entry = self.state.get("childNodes", {}).get(component_id)
+                if entry is not None:
+                    deep_merge(entry, msg.payload, make_copy=False)
             return
-        lynx_type = msg.payload.get("lynxType", None)
-        if "channels" in msg.payload or "services" in msg.payload:
-            lynx_type = "Service"
-        elif "childNodes" in msg.payload:
-            lynx_type = "Node"
-        else:
-            raise ValueError(f"Invalid Lynx type: {lynx_type}. Payload: {msg.payload}")
+        lynx_type = self._classify_about(msg.payload)
         component_path_tuple_list.append((component_path_list[-1], ComponentType(lynx_type)))
         self.recursively_set_path(component_path_tuple_list, self.state, msg.payload)

@@ -46,9 +46,12 @@ class Service(ClientComponent):
         self.channels: Dict[str, Channel] = {}
 
     def freeze_interface(self) -> None:
-        super().freeze_interface()
+        if self._interface_frozen:
+            return
         for channel in self.channels.values():
             channel.freeze_interface()
+            self.client_endpoint_topics_set.update(set(channel.endpoints.keys()))
+        super().freeze_interface()
 
     def flush_due_deadlines(self) -> None:
         now_ns = time.perf_counter_ns()
@@ -84,6 +87,9 @@ class Service(ClientComponent):
         Pass sample_function for a pulled source (Poll and sampleInterval advertised
         by default). Omit it for a pushed source; the application then calls
         channel.add_sample().
+
+        May be used as a decorator: `@service.channel("id", ...)` attaches the
+        decorated generator as the sample function and binds the name to the Channel.
         """
         new_channel = Channel(
             id=id,
@@ -102,34 +108,6 @@ class Service(ClientComponent):
         self.add_channel(new_channel)
         return new_channel
 
-    def new_channel(
-        self,
-        id: str,
-        title: str = "",
-        description: str = "",
-        output_data_properties: Optional[Dict] = None,
-        enable_poll: Optional[bool] = None,
-        enable_stream: bool = True,
-        enable_sample_interval: Optional[bool] = None,
-        stream_fields: Optional[Iterable[str]] = None,
-        commands: Optional[Sequence[ChannelCommand]] = None):
-        """
-        Decorator that creates a pulled Channel from a sample generator.
-        """
-        def decorator(sample_function: Callable):
-            return self.channel(
-                id=id,
-                title=title,
-                description=description,
-                output_data_properties=output_data_properties,
-                sample_function=sample_function,
-                enable_poll=enable_poll,
-                enable_stream=enable_stream,
-                enable_sample_interval=enable_sample_interval,
-                stream_fields=stream_fields,
-                commands=commands)
-        return decorator
-
     def add_channel(self, channel: Channel):
         """
         Add a channel to the service. Must complete before start() freezes the interface.
@@ -138,7 +116,6 @@ class Service(ClientComponent):
         if channel.id in self.channels:
             raise ValueError(f"Channel with id {channel.id} already exists in service {self.id}")
         self.channels[channel.id] = channel
-        self.client_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
 
     def produce_about(self) -> Dict:
         """

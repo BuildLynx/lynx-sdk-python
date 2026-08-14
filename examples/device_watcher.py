@@ -18,7 +18,7 @@ service = Service(
     description="Watches the device running this service and publishes statistics.")
 
 # -CPU Load-
-@service.new_channel(
+@service.channel(
     "cpuLoad",
     title="CPU Load",
     description="Polls the CPU load",
@@ -40,7 +40,7 @@ def sample_memory_status(request: InboundMessage, continue_sampling: Callable):
             "percent": mem_info.percent
         }
 
-MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
+MEMORY_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use output_data_properties
     "total": {
         "title": "Total RAM",
         "type": "integer",
@@ -86,7 +86,7 @@ service.add_channel(memory_channel)
 
 
 # -Second Alert-
-SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use the output_payload_schema instead
+SECOND_CHANNEL_DATA_SCHEMA = { # to completely define the payload schema, use output_data_properties
     "second": {
         "title": "Second",
         "type": "integer",

@@ -246,7 +246,7 @@
 </tr>
 <tr>
 <td>Lynx Version</td>
-<td>A2.0</td>
+<td>A2.1</td>
 </tr>
 <tr>
 <td>Time Source</td>
@@ -269,18 +269,12 @@
 <li><code>title</code> <strong>string</strong> — The readable title of the Component.</li>
 <li><code>description</code> <strong>string</strong> — The description of the Component.</li>
 <li><code>lynx_version</code> <strong>string</strong> — The Lynx protocol version used by the Component.<br />
-<code>enum: A2.0</code></li>
+<code>enum: A2.1</code></li>
 </ul>
 </li>
 <li><code>config</code> <strong>object</strong> — Config covers the mutable configuration of the Component.</li>
-<li><code>status</code> <strong>object</strong> — Status covers the mutable status of the Component.<ul>
-<li><code>state</code> <strong>string</strong> — The state of the Component.<br />
-<code>enum: idle,busy,disconnected,disabled</code></li>
-<li><code>action</code> <strong>object</strong> — The currently executing command or query on the Channel.<ul>
-<li><code>command</code> <strong>string</strong> — The command of the action.</li>
-<li><code>payload</code> <strong>object</strong> — The payload of the action.</li>
-</ul>
-</li>
+<li><code>status</code> <strong>object</strong> — Status covers the mutable status of the Component. Shape varies by component type.<ul>
+<li><code>connected</code> <strong>boolean</strong> — Whether the Service is connected to the Lynx network.</li>
 </ul>
 </li>
 <li><code>endpoints</code> <strong>object</strong> — Object representing all the endpoints of the Component.</li>
@@ -293,8 +287,8 @@
 <p>Query information about the Component.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Refer to Lynx standard contents argument for details.<br />
-<code>default: {}</code></li>
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
 </ul>
 </details>
 <details>
@@ -317,11 +311,11 @@
 <details>
 <summary><code>deviceWatcher/cpuLoad/!/Poll</code> — sub</summary>
 <blockquote>
-<p>Start polling at a set time interval on the channel for data.</p>
+<p>Produce one sample immediately.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
 </ul>
 </details>
 <details>
@@ -330,35 +324,40 @@
 <p>Start streaming on the channel, emitting data when available.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
-<li><code>interval</code> <strong>number</strong> — Seconds between samples<br />
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
+<li><code>sampleInterval</code> <strong>number</strong> — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.<br />
 <code>default: 1.0</code> <code>minimum: 0</code></li>
-<li><code>numSamples</code> <strong>integer</strong> — 1 for single, 0 for infinite, positive int for numbered, default 0<br />
+<li><code>numSamples</code> <strong>integer</strong> — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.<br />
 <code>default: 0</code> <code>minimum: 0</code></li>
-<li><code>paginate</code> <strong>integer</strong> — 0 for no pagination (all data in one payload), positive int for page size, default 1<br />
+<li><code>batch</code> <strong>object</strong> — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.<ul>
+<li><code>maxInterval</code> <strong>number</strong> — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).<br />
+<code>default: 300</code> <code>minimum: 0</code></li>
+<li><code>maxSamples</code> <strong>integer</strong> — Max samples per published message. 0 = no count limit.<br />
 <code>default: 1</code> <code>minimum: 0</code></li>
+</ul>
+</li>
 </ul>
 </details>
 <details>
 <summary><code>deviceWatcher/cpuLoad/!/Stop</code> — sub</summary>
 <blockquote>
-<p>Stop polling or streaming on the channel.</p>
+<p>Stop the active command on the channel.</p>
 </blockquote>
 <p><em>Empty payload</em></p>
 </details>
 <details>
 <summary><code>deviceWatcher/cpuLoad/&lt;</code> — pub</summary>
 <blockquote>
-<p>Output data from the channel.</p>
+<p>Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.</p>
 </blockquote>
 <ul>
 <li><code>[]</code> <strong>array</strong><ul>
-<li><code>s</code> <strong>integer</strong> — Seconds since the start of the channel</li>
-<li><code>ns</code> <strong>integer</strong> — Nanoseconds since the start of the channel</li>
+<li><code>s</code> <strong>integer</strong> — Seconds since the start of the current stream</li>
+<li><code>ns</code> <strong>integer</strong> — Nanoseconds remainder since the start of the current stream</li>
 <li><code>data</code> <strong>object</strong> — The data from the channel<ul>
 <li><code>load</code> <strong>number</strong><br />
-<code>unit: %</code></li>
+<code>minimum: 0</code> <code>maximum: 100</code> <code>unit: %</code></li>
 </ul>
 </li>
 </ul>
@@ -370,11 +369,11 @@
 <details>
 <summary><code>deviceWatcher/memory/!/Poll</code> — sub</summary>
 <blockquote>
-<p>Start polling at a set time interval on the channel for data.</p>
+<p>Produce one sample immediately.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
 </ul>
 </details>
 <details>
@@ -383,41 +382,46 @@
 <p>Start streaming on the channel, emitting data when available.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
-<li><code>interval</code> <strong>number</strong> — Seconds between samples<br />
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
+<li><code>sampleInterval</code> <strong>number</strong> — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.<br />
 <code>default: 1.0</code> <code>minimum: 0</code></li>
-<li><code>numSamples</code> <strong>integer</strong> — 1 for single, 0 for infinite, positive int for numbered, default 0<br />
+<li><code>numSamples</code> <strong>integer</strong> — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.<br />
 <code>default: 0</code> <code>minimum: 0</code></li>
-<li><code>paginate</code> <strong>integer</strong> — 0 for no pagination (all data in one payload), positive int for page size, default 1<br />
+<li><code>batch</code> <strong>object</strong> — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.<ul>
+<li><code>maxInterval</code> <strong>number</strong> — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).<br />
+<code>default: 300</code> <code>minimum: 0</code></li>
+<li><code>maxSamples</code> <strong>integer</strong> — Max samples per published message. 0 = no count limit.<br />
 <code>default: 1</code> <code>minimum: 0</code></li>
+</ul>
+</li>
 </ul>
 </details>
 <details>
 <summary><code>deviceWatcher/memory/!/Stop</code> — sub</summary>
 <blockquote>
-<p>Stop polling or streaming on the channel.</p>
+<p>Stop the active command on the channel.</p>
 </blockquote>
 <p><em>Empty payload</em></p>
 </details>
 <details>
 <summary><code>deviceWatcher/memory/&lt;</code> — pub</summary>
 <blockquote>
-<p>Output data from the channel.</p>
+<p>Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.</p>
 </blockquote>
 <ul>
 <li><code>[]</code> <strong>array</strong><ul>
-<li><code>s</code> <strong>integer</strong> — Seconds since the start of the channel</li>
-<li><code>ns</code> <strong>integer</strong> — Nanoseconds since the start of the channel</li>
+<li><code>s</code> <strong>integer</strong> — Seconds since the start of the current stream</li>
+<li><code>ns</code> <strong>integer</strong> — Nanoseconds remainder since the start of the current stream</li>
 <li><code>data</code> <strong>object</strong> — The data from the channel<ul>
 <li><code>total</code> <strong>integer</strong> — Total amount of RAM in bytes<br />
-<code>unit: bytes</code></li>
+<code>minimum: 0</code> <code>unit: bytes</code></li>
 <li><code>used</code> <strong>integer</strong> — Used amount of RAM in bytes<br />
-<code>unit: bytes</code></li>
+<code>minimum: 0</code> <code>unit: bytes</code></li>
 <li><code>free</code> <strong>integer</strong> — Free amount of RAM in bytes<br />
-<code>unit: bytes</code></li>
+<code>minimum: 0</code> <code>unit: bytes</code></li>
 <li><code>percent</code> <strong>number</strong> — Percentage of RAM used<br />
-<code>unit: %</code></li>
+<code>minimum: 0</code> <code>maximum: 100</code> <code>unit: %</code></li>
 </ul>
 </li>
 </ul>
@@ -425,49 +429,42 @@
 </ul>
 </details>
 <h3>Second Alert</h3>
-<p>Emit the time every time the second changes</p>
-<details>
-<summary><code>deviceWatcher/secondAlert/!/Poll</code> — sub</summary>
-<blockquote>
-<p>Start polling at a set time interval on the channel for data.</p>
-</blockquote>
-<ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
-</ul>
-</details>
+<p>Simulated alert: emits once per wall-clock second.</p>
 <details>
 <summary><code>deviceWatcher/secondAlert/!/Stream</code> — sub</summary>
 <blockquote>
 <p>Start streaming on the channel, emitting data when available.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
-<li><code>interval</code> <strong>number</strong> — Seconds between samples<br />
-<code>default: 1.0</code> <code>minimum: 0</code></li>
-<li><code>numSamples</code> <strong>integer</strong> — 1 for single, 0 for infinite, positive int for numbered, default 0<br />
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
+<li><code>numSamples</code> <strong>integer</strong> — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.<br />
 <code>default: 0</code> <code>minimum: 0</code></li>
-<li><code>paginate</code> <strong>integer</strong> — 0 for no pagination (all data in one payload), positive int for page size, default 1<br />
+<li><code>batch</code> <strong>object</strong> — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.<ul>
+<li><code>maxInterval</code> <strong>number</strong> — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).<br />
+<code>default: 300</code> <code>minimum: 0</code></li>
+<li><code>maxSamples</code> <strong>integer</strong> — Max samples per published message. 0 = no count limit.<br />
 <code>default: 1</code> <code>minimum: 0</code></li>
+</ul>
+</li>
 </ul>
 </details>
 <details>
 <summary><code>deviceWatcher/secondAlert/!/Stop</code> — sub</summary>
 <blockquote>
-<p>Stop polling or streaming on the channel.</p>
+<p>Stop the active command on the channel.</p>
 </blockquote>
 <p><em>Empty payload</em></p>
 </details>
 <details>
 <summary><code>deviceWatcher/secondAlert/&lt;</code> — pub</summary>
 <blockquote>
-<p>Output data from the channel.</p>
+<p>Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.</p>
 </blockquote>
 <ul>
 <li><code>[]</code> <strong>array</strong><ul>
-<li><code>s</code> <strong>integer</strong> — Seconds since the start of the channel</li>
-<li><code>ns</code> <strong>integer</strong> — Nanoseconds since the start of the channel</li>
+<li><code>s</code> <strong>integer</strong> — Seconds since the start of the current stream</li>
+<li><code>ns</code> <strong>integer</strong> — Nanoseconds remainder since the start of the current stream</li>
 <li><code>data</code> <strong>object</strong> — The data from the channel<ul>
 <li><code>second</code> <strong>integer</strong> — The second of the minute<br />
 <code>unit: seconds</code></li>
@@ -485,11 +482,11 @@
 <details>
 <summary><code>deviceWatcher/random/!/Poll</code> — sub</summary>
 <blockquote>
-<p>Start polling at a set time interval on the channel for data.</p>
+<p>Produce one sample immediately.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
 </ul>
 </details>
 <details>
@@ -498,32 +495,37 @@
 <p>Start streaming on the channel, emitting data when available.</p>
 </blockquote>
 <ul>
-<li><code>contents</code> <strong>object | boolean</strong> — Default everything to true if empty<br />
-<code>default: {}</code></li>
-<li><code>interval</code> <strong>number</strong> — Seconds between samples<br />
+<li><code>contents</code> <strong>object | boolean</strong> — Omit or true for the full payload. An empty object {} selects no keys.<br />
+<code>default: True</code></li>
+<li><code>sampleInterval</code> <strong>number</strong> — Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.<br />
 <code>default: 1.0</code> <code>minimum: 0</code></li>
-<li><code>numSamples</code> <strong>integer</strong> — 1 for single, 0 for infinite, positive int for numbered, default 0<br />
+<li><code>numSamples</code> <strong>integer</strong> — Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.<br />
 <code>default: 0</code> <code>minimum: 0</code></li>
-<li><code>paginate</code> <strong>integer</strong> — 0 for no pagination (all data in one payload), positive int for page size, default 1<br />
+<li><code>batch</code> <strong>object</strong> — Flush limits for the open batch. Omitted object or omitted fields use the field defaults.<ul>
+<li><code>maxInterval</code> <strong>number</strong> — Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).<br />
+<code>default: 300</code> <code>minimum: 0</code></li>
+<li><code>maxSamples</code> <strong>integer</strong> — Max samples per published message. 0 = no count limit.<br />
 <code>default: 1</code> <code>minimum: 0</code></li>
+</ul>
+</li>
 </ul>
 </details>
 <details>
 <summary><code>deviceWatcher/random/!/Stop</code> — sub</summary>
 <blockquote>
-<p>Stop polling or streaming on the channel.</p>
+<p>Stop the active command on the channel.</p>
 </blockquote>
 <p><em>Empty payload</em></p>
 </details>
 <details>
 <summary><code>deviceWatcher/random/&lt;</code> — pub</summary>
 <blockquote>
-<p>Output data from the channel.</p>
+<p>Output data from the channel. A JSON array of timestamped samples; an empty array is a valid Stream message.</p>
 </blockquote>
 <ul>
 <li><code>[]</code> <strong>array</strong><ul>
-<li><code>s</code> <strong>integer</strong> — Seconds since the start of the channel</li>
-<li><code>ns</code> <strong>integer</strong> — Nanoseconds since the start of the channel</li>
+<li><code>s</code> <strong>integer</strong> — Seconds since the start of the current stream</li>
+<li><code>ns</code> <strong>integer</strong> — Nanoseconds remainder since the start of the current stream</li>
 <li><code>data</code> <strong>object</strong> — The data from the channel<ul>
 <li><code>number</code> <strong>number</strong> — A random integer between 1 and 3</li>
 </ul>

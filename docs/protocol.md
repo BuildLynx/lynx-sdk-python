@@ -641,7 +641,7 @@ Channel output is always a **JSON array** of sample objects. The array MAY be em
 |-------|------|-------------|
 | `s` | integer | Seconds elapsed since the start of the current stream/poll |
 | `ns` | integer | Nanoseconds remainder (0 to 999,999,999) |
-| `data` | object | The sample data, validated against the channel's `output_data_properties` |
+| `data` | object | The sample data, validated against the `<` endpoint's `payload_schema` |
 
 Timestamps are **relative to the start of the current stream** (or zero for a Poll), measured via a high-resolution performance counter. They do **not** reset when a batch is published -- every sample in every batch of a stream shares the same origin (see section 9.2).
 
@@ -867,6 +867,8 @@ motion.add_sample({"confidence": 0.92})   # discarded unless a command is active
 
 The `motion` Channel advertises `!/Stream`, `!/Stop`, and `<`, but not `!/Poll`: motion cannot be produced on request.
 
+`service.channel()` is both a factory and a decorator. `@service.channel(...)` attaches the decorated generator as the sample function and binds the name to the Channel; `motion = service.channel(...)` returns a Channel for a pushed source.
+
 ---
 
 ## 8. Nodes
@@ -888,7 +890,7 @@ The `+/@/About` subscription uses the MQTT `+` single-level wildcard to match an
 
 ### 8.2 Node About Payload
 
-A Node's About extends the base About with `services` and `child_nodes`:
+A Node's About extends the base About with `services` and `childNodes`:
 
 ```json
 {
@@ -904,7 +906,33 @@ A Node's About extends the base About with `services` and `child_nodes`:
   "status": {
     "connected": true
   },
-  "endpoints": { },
+  "endpoints": {
+    "edgeNode01/@/About": {
+      "endpoint_direction": "pub",
+      "description": "Publish information about the Component.",
+      "payload_schema": { ... },
+      "additionalProperties": false
+    },
+    "edgeNode01/?/About": {
+      "endpoint_direction": "sub",
+      "description": "Query information about the Component.",
+      "payload_schema": { ... },
+      "additionalProperties": false,
+      "replyTopics": ["edgeNode01/@/About"]
+    },
+    "edgeNode01/@/Notice": {
+      "endpoint_direction": "pub",
+      "description": "Publish a notice about the Component.",
+      "payload_schema": { ... },
+      "additionalProperties": false
+    },
+    "+/@/About": {
+      "endpoint_direction": "sub",
+      "description": "Monitor about messages from child nodes and services.",
+      "payload_schema": { ... },
+      "additionalProperties": true
+    }
+  },
   "services": {
     "deviceWatcher": {
       "lynxType": "Service",
@@ -913,11 +941,11 @@ A Node's About extends the base About with `services` and `child_nodes`:
       "channels": { }
     }
   },
-  "child_nodes": {}
+  "childNodes": {}
 }
 ```
 
-The `services` and `child_nodes` maps are populated automatically as the Node receives About messages on `+/@/About`.
+The `services` and `childNodes` maps are populated automatically as the Node receives About messages on `+/@/About`.
 
 ### 8.3 Multi-Node Topology
 
@@ -1104,8 +1132,10 @@ Nodes (and optionally Services with `track_network_state=True`) maintain a `Netw
 
 Every incoming About message on `+/@/About` is parsed, and the component is placed into the appropriate branch based on its `lynxType`:
 
-- `"Service"` (or any payload containing `channels` or `services`) -> `services[id]`
-- `"Node"` (or any payload containing `childNodes`) -> `childNodes[id]`
+- `"Service"` -> `services[id]`
+- `"Node"` -> `childNodes[id]`
+
+`lynxType` is authoritative. A Node About contains both `services` and `childNodes`, so payload-key sniffing is not a substitute. When `lynxType` is absent, a payload containing `channels` is treated as a Service and a payload containing `childNodes` is treated as a Node.
 
 ### 10.5 Last Will and Testament (LWT)
 
@@ -1299,7 +1329,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
 
 ### A.2 Node About (`@/About`)
 
-Extends the Service About schema with `services` and `child_nodes`:
+Extends the Service About schema with `services` and `childNodes`:
 
 ```json
 {
@@ -1357,7 +1387,7 @@ Extends the Service About schema with `services` and `child_nodes`:
       "type": "object",
       "description": "Map of service ID to service About object."
     },
-    "child_nodes": {
+    "childNodes": {
       "type": "object",
       "description": "Map of child node ID to node About object (recursive)."
     }

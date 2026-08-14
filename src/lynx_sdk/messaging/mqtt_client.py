@@ -18,7 +18,7 @@ import orjson
 @dataclass
 class InboundMessage:
     """
-    Normalized inbound MQTT message passed to Lynx SubEndpoint handlers.
+    Normalized inbound MQTT message passed to Lynx InEndpoint handlers.
     """
     topic: str
     payload: Dict

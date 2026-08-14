@@ -3,10 +3,10 @@ Channel class for Lynx. A Channel is the encapsulation of a single input and/or 
 
 Generative AI was used in the Creation/Modification of this file.
 
-The advertised command set is composed from capabilities (A2.1 section 7.1).
-Long-running command concurrency lives in ActiveCommand; admission, batching,
-and the sampleInterval gate live in ActiveStream. This class binds those to
-MQTT and, for pulled sources, an optional sample thread.
+The advertised command set is composed from capabilities (A2.1 section 7.1)
+at interface freeze. Long-running command concurrency lives in ActiveCommand;
+admission, batching, and the sampleInterval gate live in ActiveStream. This
+class binds those to MQTT and, for pulled sources, an optional sample thread.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from lynx_sdk.protocol.capabilities import (
     CapabilityError,
     compose_channel_commands,
     data_output_endpoint_args,
-    stop_command,
     validate_action_name,
 )
 from lynx_sdk.protocol.component_type import ComponentType
@@ -99,14 +98,44 @@ class Channel(Component):
         self._stream_thread: Optional[threading.Thread] = None
         self._active_command = ActiveCommand()
 
-        pulled = sample_function is not None
-        self._commands: list[ChannelCommand] = compose_channel_commands(
-            pulled=pulled,
-            enable_poll=enable_poll,
-            enable_stream=enable_stream,
-            stream_fields=stream_fields,
-            enable_sample_interval=enable_sample_interval,
-            custom_commands=commands)
+        self._enable_poll = enable_poll
+        self._enable_stream = enable_stream
+        self._enable_sample_interval = enable_sample_interval
+        self._declared_stream_fields: Optional[list[str]] = (
+            list(stream_fields) if stream_fields is not None else None)
+        self._output_data_properties = output_data_properties
+        self._custom_commands: list[ChannelCommand] = list(commands) if commands else []
+        self._commands: list[ChannelCommand] = []
+        self._stream_fields: set[str] = set()
+        self._honors_sample_interval = False
+
+        self.cmd_poll_endpoint = None
+        self.cmd_stream_endpoint = None
+        self.cmd_stop_endpoint = None
+        self.out_data_endpoint: Optional[OutEndpoint] = None
+
+        self.config: Dict[str, Any] = config if config is not None else {"streamOnStartup": False}
+
+    def __call__(self, sample_function: Callable) -> Channel:
+        """Attach a sample generator so Service.channel() can be used as a decorator."""
+        self.require_mutable_interface("attach a sample source")
+        if self._sample_function is not None:
+            raise CapabilityError(
+                f"Channel '{self.id}' already has a sample function; cannot attach another.")
+        self._sample_function = sample_function
+        return self
+
+    def freeze_interface(self) -> None:
+        if self._interface_frozen:
+            return
+
+        self._commands = compose_channel_commands(
+            pulled=self._sample_function is not None,
+            enable_poll=self._enable_poll,
+            enable_stream=self._enable_stream,
+            stream_fields=self._declared_stream_fields,
+            enable_sample_interval=self._enable_sample_interval,
+            custom_commands=self._custom_commands)
 
         stream_cmd = next((c for c in self._commands if c.action == "Stream"), None)
         if stream_cmd is not None and stream_cmd.payload_properties is not None:
@@ -115,9 +144,6 @@ class Channel(Component):
             self._stream_fields = set()
         self._honors_sample_interval = STREAM_FIELD_SAMPLE_INTERVAL in self._stream_fields
 
-        self.cmd_poll_endpoint = None
-        self.cmd_stream_endpoint = None
-        self.cmd_stop_endpoint = None
         for command in self._commands:
             endpoint = self.new_in_endpoint(self._handler_for(command), **command.endpoint_args())
             if command.action == "Poll":
@@ -129,12 +155,11 @@ class Channel(Component):
 
         produces_data = any(c.data_output for c in self._commands)
         if produces_data:
-            self.out_data_endpoint: Optional[OutEndpoint] = self.new_out_endpoint(
-                **data_output_endpoint_args(output_data_properties))
-        else:
-            self.out_data_endpoint = None
+            self.out_data_endpoint = self.new_out_endpoint(
+                **data_output_endpoint_args(self._output_data_properties))
 
-        self.config: Dict[str, Any] = config if config is not None else {"streamOnStartup": False}
+        super().freeze_interface()
+
         if self.config.get("streamOnStartup", False):
             self.start_stream_handler(msg=InboundMessage(topic="", payload={"contents": True}))
 
@@ -175,6 +200,10 @@ class Channel(Component):
         long_running: bool = False) -> ChannelCommand:
         """
         Add a user-defined !/{Action} command. Must be called before the Service starts.
+
+        Endpoints are created at interface freeze. Guards here check declared
+        intent: dataOutput requires that a '<' endpoint will exist (Stream,
+        Poll, or an earlier data-producing command).
         """
         self.require_mutable_interface("add a command")
         validate_action_name(action)
@@ -182,13 +211,9 @@ class Channel(Component):
             self.logger.warning(
                 f"Command action {action!r} is a common verb reserved for possible future "
                 "built-ins. Prefer an application-prefixed name such as 'AcmeCalibrate'.")
-        if any(c.action == action for c in self._commands):
+        if any(c.action == action for c in self._custom_commands):
             raise CapabilityError(f"Channel '{self.id}' already has command {action!r}")
-        if long_running and self.cmd_stop_endpoint is None:
-            stop = stop_command()
-            self._commands.append(stop)
-            self.cmd_stop_endpoint = self.new_in_endpoint(self.stop_handler, **stop.endpoint_args())
-        if data_output and self.out_data_endpoint is None:
+        if data_output and not self._will_have_data_endpoint():
             raise CapabilityError(
                 f"Command {action!r} declares dataOutput but this channel has no '<' endpoint. "
                 "Enable Stream or another data-producing command first.")
@@ -201,9 +226,18 @@ class Channel(Component):
             data_output=data_output,
             long_running=long_running,
             handler=handler)
-        self._commands.append(command)
-        self.new_in_endpoint(self._handler_for(command), **command.endpoint_args())
+        self._custom_commands.append(command)
         return command
+
+    def _will_have_data_endpoint(self) -> bool:
+        if self._enable_stream:
+            return True
+        include_poll = (
+            self._enable_poll if self._enable_poll is not None
+            else self._sample_function is not None)
+        if include_poll:
+            return True
+        return any(c.data_output for c in self._custom_commands)
 
     def add_sample(self, data: Any) -> bool:
         """

@@ -51,6 +51,7 @@ def docs_cmd(
 ):
     """Generate markdown documentation for a Lynx Service."""
     service = _resolve_service(target)
+    service.freeze_interface()
     about = service.produce_about()
     service_id = about["docs"]["id"]
     title = about["docs"].get("title") or service_id
@@ -66,7 +67,7 @@ def docs_cmd(
     base_path = output if output else Path.cwd() / service_id
 
     md_path = base_path.with_suffix(".md")
-    md_path.write_text(md_content, encoding="utf-8")
+    md_path.write_text(md_content, encoding="utf-8", newline="\n")
     rprint(f"[green]Markdown written to {md_path}[/green]")
 
     if html or pdf:
@@ -76,7 +77,7 @@ def docs_cmd(
 
         if html:
             html_path = base_path.with_suffix(".html")
-            html_path.write_text(html_content, encoding="utf-8")
+            html_path.write_text(html_content, encoding="utf-8", newline="\n")
             rprint(f"[green]HTML written to {html_path}[/green]")
 
         if pdf:
