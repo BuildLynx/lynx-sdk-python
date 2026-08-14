@@ -2,7 +2,9 @@
 
 # The Lynx Protocol
 
-**Version: A2.1**
+**Version: A3.0 (draft)**
+
+> **Draft status.** A3.0 separates presence from description, makes the network hierarchy explicit in the topic structure, and withdraws the interface freeze. These are breaking changes against A2.1 and the Python SDK still implements A2.1. Sections marked *(A3.0)* describe behavior that is specified but not yet implemented.
 
 ---
 
@@ -15,27 +17,28 @@ Any standard MQTT client can participate in a Lynx network. Lynx simply defines 
 ### Design Philosophy
 
 - **Minimal complexity.** Lynx adds structure to MQTT, not a new transport. If you know MQTT, you already know most of Lynx.
-- **Self-describing.** Every Lynx component publishes an "About" payload that fully describes its identity, capabilities, endpoints, and current status.
+- **Self-describing.** Every Lynx component can produce an "About" payload that fully describes its identity, capabilities, endpoints, and current status.
+- **Cheap presence.** Discovery does not require reading descriptions. Each component keeps one small retained record saying that it exists and whether it is connected; descriptions are fetched on demand.
 - **Schema-enforced.** Payloads are JSON validated against JSON Schema (Draft 7), so producers and consumers agree on shape at protocol level.
-- **Composable.** Services contain Channels; Nodes connect Services and other child Nodes. The hierarchy is simple and extensible.
+- **Composable.** Services contain Channels; Nodes connect Services and other child Nodes. Each Node runs its own broker and relays between layers, so a component publishes as though it were alone on a broker and never needs to know where it sits in the tree.
 
 ---
 
 ## 2. Overview
 
-Lynx organizes an MQTT broker into a layered hierarchy of **Nodes**, **Services**, and **Channels**.
+Lynx organizes MQTT into a layered hierarchy of **Nodes**, **Services**, and **Channels**. A Node owns a broker; the Services and child Nodes connected to it form one layer, and the Node joins that layer to the one above.
 
 ```mermaid
 graph TD
-    Broker["MQTT Broker"]
-    Node["Node"]
+    ParentNode["Parent Node -- its own broker"]
+    Node["Node -- broker"]
     ServiceA["Service A"]
     ServiceB["Service B"]
     ChannelA1["Channel A1"]
     ChannelA2["Channel A2"]
     ChannelB1["Channel B1"]
 
-    Broker --- Node
+    ParentNode --- Node
     Node --- ServiceA
     Node --- ServiceB
     ServiceA --- ChannelA1
@@ -45,11 +48,11 @@ graph TD
 
 | Layer | Role |
 |-------|------|
-| **Node** | Broker-adjacent coordinator. Monitors connected Services and child Nodes, maintains a NetworkState tree. |
-| **Service** | Application boundary. Owns an MQTT client, a time source, and one or more Channels. Publishes a retained self-description. |
+| **Node** | Owns a broker and relays between layers. Monitors connected Services and child Nodes, maintains a NetworkState tree, and bridges its layer to its parent Node. |
+| **Service** | Application boundary. Owns an MQTT client, a time source, and one or more Channels. Publishes a retained presence record and describes itself on request. |
 | **Channel** | Single data stream. Accepts commands (`Poll`, `Stream`, `Stop`, or application-defined) and publishes timestamped sample arrays. |
 
-A Lynx network can run with just a Service connected to any MQTT broker -- Nodes are optional. Any vanilla MQTT client can subscribe to Lynx topics and consume the JSON payloads directly.
+A Lynx network can run with just a Service connected to any MQTT broker -- Nodes are optional, and are what turn a single broker into a multi-layer network (section 5.4). Any vanilla MQTT client can subscribe to Lynx topics and consume the JSON payloads directly.
 
 ---
 
@@ -60,7 +63,7 @@ A Lynx network can run with just a Service connected to any MQTT broker -- Nodes
 - **Sensor networks and device telemetry.** A Raspberry Pi publishing CPU load, temperature, and memory stats. An embedded device reporting accelerometer readings. Lynx's Channel abstraction maps naturally to periodic or event-driven sensor data.
 - **Edge monitoring and fleet dashboards.** Nodes at the edge track which Services are alive, their status, and their channel states -- forming a real-time topology view.
 - **Schema-enforced IoT data pipelines.** Every Channel declares its output schema. Consumers know the shape of the data before the first sample arrives.
-- **Self-describing, discoverable service networks.** No external service registry needed. Subscribe to `+/@/About` and the network describes itself.
+- **Self-describing, discoverable service networks.** No external service registry needed. Subscribe to `+/@/Status` for the roster and ask each component for its description.
 - **Rapid prototyping.** Define a Service, attach a Channel with a data source, start it. Data flows in seconds.
 - **Lightweight data acquisition (DAQ) systems.** Stream parameters (`sampleInterval`, `numSamples`, `batch`) give fine-grained control over sampling rate and how samples are grouped into published messages.
 
@@ -69,8 +72,9 @@ A Lynx network can run with just a Service connected to any MQTT broker -- Nodes
 - **No TCP/IP network available.** Lynx is built on MQTT which requires TCP/IP. Additionally an MQTT broker or Lynx Node is required.
 - **Heavy computation inside sampling loops.** CPU-bound or long-blocking work in a Channel's data source delays sample production. Batch flushes (including empty keepalives and the stream-end flush) MUST proceed independently of the source, but a blocked source still cannot produce new samples until it returns.
 - **Non-JSON / binary payloads.** Lynx payloads are JSON objects. Large binary data (images, video, raw ADC buffers) would need base64 encoding or an out-of-band mechanism.
-- **Very large-scale deployments (1k+ devices).** Every Service publishes a retained `@/About` message. At extreme scale, the broker's retained message store and the wildcard subscription `+/@/About` may become bottlenecks.
-- **RPC-heavy / request-response architectures.** Lynx is oriented around pub/sub data streams, not request-response patterns. While `?/About` is a query-response pattern, Channels are one-directional output streams.
+- **Very large-scale deployments (1k+ devices).** The retained store holds only a small presence record per component (section 4.8), so retained storage is no longer the limit it was in A2.1. The cost has moved to discovery: learning the roster is cheap, but reading every component's description is one request-response exchange per component, and a burst of observers joining at once produces a corresponding burst of About publishes. Nodes absorb this by aggregating their subtree (section 8.2), which makes a Node close to mandatory at scale rather than optional.
+- **Deployments where a subtree must keep its data local.** A Node forwards its layer upward by default (section 5.4), so anything published anywhere in the tree is visible to every ancestor. Restricting what crosses a layer is a Node configuration concern, not something a Service can enforce for itself.
+- **RPC-heavy / request-response architectures.** Lynx is oriented around pub/sub data streams, not request-response patterns. While `?/About` and `?/Sync` are query-response patterns, Channels are one-directional output streams.
 
 ---
 
@@ -84,6 +88,8 @@ The base entity in Lynx. Every Component has:
 - **Endpoints**: a set of MQTT topics it publishes to or subscribes on
 - **Status**: an object describing mutable runtime status (`connected` for Services/Nodes; `command` for Channels)
 - **About**: a method to produce a full self-description as a JSON object
+
+Services and Nodes additionally own an MQTT connection, and so publish a retained **presence record** on `@/Status` (section 4.8) and answer hash reconciliation on `?/Sync` (section 4.9).
 
 ### 4.2 Component Types
 
@@ -110,7 +116,7 @@ classDiagram
     class ClientComponent {
         owns an MQTT connection
         time_source
-        retained About
+        retained Status
         Last Will and Testament
     }
 
@@ -144,7 +150,19 @@ An Endpoint is a single MQTT topic with:
 
 ### 4.4 About
 
-Every component can produce an "About" payload -- a JSON object that fully describes the component. Services and Nodes publish their About as a **retained** MQTT message so that new subscribers immediately receive the current state of the network.
+Every component can produce an "About" payload -- a JSON object that fully describes the component: identity, configuration, status, endpoints, and, for Services and Nodes, its children.
+
+**About is published `retain=false`.** *(A3.0)* A component publishes it on connect, in reply to a `?/About` query, and whenever it chooses to announce a change. Because the broker stores nothing, an About publish cannot affect any consumer other than those listening at that moment, and a component MAY publish a **partial** About carrying only the subtree that changed:
+
+```json
+{ "channels": { "cpuLoad": { "status": { "command": null } } } }
+```
+
+A receiver merges a partial About onto its cached copy. A receiver holding no cached copy for that component MUST ignore the partial and request a full About instead; a partial is an update to a description, never a substitute for one.
+
+Discovery does not depend on About. A component's existence and liveness are advertised by its retained `@/Status` record (section 4.8), which is what a late-joining consumer reads to learn that the component is there. Having learned that, the consumer asks for the description it wants.
+
+**Design note -- why About is no longer retained (changed in A3.0):** through A2.1, About was retained and served as the registry. That put two payloads with opposite lifetimes on one retained topic. MQTT stores exactly one retained message per topic and never merges, so every partial publish -- a channel status change, a `contents`-filtered query reply, or the Last Will -- replaced the full description and erased the component's interface from the broker until someone queried it again. The mechanisms that grew up around this (the interface freeze in section 4.7, the partial-update carve-out, the hash mode of `contents`) were each compensating for the same conflict. Separating presence from description removes the conflict at its source, and partial Abouts become safe by construction.
 
 ### 4.5 Contents
 
@@ -156,7 +174,8 @@ A filtering mechanism that lets consumers request only the parts of a payload th
 | `{}` | Select no keys. Returns an empty object. When nested (e.g. `"channels": {}`), the parent key is kept with an empty object value. |
 | `false` | Return only values that changed since the last sample (change-of-value). |
 | `{"key1": true, "key2": false}` | Select specific keys; per-key `true`/`false` controls inclusion or change-of-value. |
-| `"<xxh32 hex string>"` | Return the payload only if its xxh32 hash differs from the provided hash. |
+
+*(A3.0)* The A2.1 string mode, in which `contents` carried an xxh32 digest and the payload was returned only if it differed, is withdrawn. Hash comparison is now the job of `?/Sync` (section 4.9), which locates differences at any depth rather than answering a single all-or-nothing question about the whole payload. `contents` selects; Sync compares. Keeping two hashing mechanisms would have meant maintaining two canonicalization contracts for the same digests.
 
 ### 4.6 Endpoint Metadata
 
@@ -205,7 +224,7 @@ The field is omitted for payloads that are not objects. The channel data topic `
 
 #### `replyTopics`
 
-Declares the set of MQTT topics that each receive exactly **one** message in the nominal (non-error) flow of this endpoint. The array is **unordered**. Each entry must be a complete, absolute MQTT topic (e.g. `deviceWatcher/@/About`) -- wildcards (`+`, `#`) are not permitted.
+Declares the set of MQTT topics that each receive exactly **one** message in the nominal (non-error) flow of this endpoint. The array is **unordered**. Each entry must be a complete MQTT topic in the declaring component's local frame (e.g. `deviceWatcher/@/About`; see section 4.10) -- wildcards (`+`, `#`) are not permitted.
 
 Three-state semantics:
 
@@ -217,7 +236,9 @@ Three-state semantics:
 
 `replyTopics` only appears on InEndpoints (endpoints with `endpoint_direction` of `"sub"` or `"pubsub"`). OutEndpoints (direction `"pub"`) do not carry this field. The channel data topic (`<`) is never listed in `replyTopics` -- data output is signaled exclusively via `dataOutput`.
 
-**Design note -- cross-component topics (allowed):** Entries may reference topics outside the declaring component's namespace. This enables aggregators and orchestrators to declare replies on other services' topics. The tradeoff is that consumers cannot assume replies stay within the advertiser's topic tree, and About validation cannot verify topic ownership.
+**Design note -- cross-component topics (disallowed as of A3.0):** every entry MUST lie within the declaring component's own namespace -- that is, it MUST begin with `{componentId}/`. A2.1 permitted entries pointing at other components' topics so that aggregators could declare replies on the services they fronted. That is withdrawn because topics are now frame-relative (section 4.10): a consumer reading an About several layers up re-roots every topic in it by the path the About arrived on, and that rewrite is only correct for topics in the publisher's own frame. A foreign topic cannot be re-rooted, because the consumer has no way to know which frame it was written in.
+
+The cost is that an aggregator can no longer declare "this command replies on the topic of the service it wraps." It must either publish the reply within its own namespace or leave `replyTopics` undeclared.
 
 **Design note -- no wildcards (disallowed):** Restricting entries to concrete topics keeps the "one message per listed topic" guarantee well-defined and avoids match-count ambiguity. The tradeoff is that reply sets like "every child's `@/About`" cannot be expressed compactly; each topic must be listed individually.
 
@@ -235,19 +256,116 @@ Three-state semantics:
 
 Setting `dataOutput: true` is invalid if the channel does not have a `<` endpoint.
 
-OutEndpoints (`<`, `@/About`, `@/Notice`) never carry `dataOutput`.
+OutEndpoints (`<`, `@/Status`, `@/About`, `@/Sync`, `@/Notice`) never carry `dataOutput`.
 
 ### 4.7 Interface Stability
 
 A component's **interface** is its set of endpoints together with their metadata: directions, payload schemas, `additionalProperties`, `replyTopics`, and `dataOutput`. In About terms, it is everything under `endpoints` -- including the `endpoints` of each Channel -- as distinct from the mutable `config` and `status`.
 
-**A component's interface MUST NOT change after its first `@/About` publish.** Endpoints may not be added or removed, and schemas may not be altered, for the lifetime of that component's connection.
+**A component's interface MAY change while it is connected.** *(A3.0)* Endpoints may be added or removed and schemas altered, subject to the obligations below.
 
-This rule exists because `@/About` is retained (section 10.1). A consumer may hold a cached copy of an interface it received from the broker's retained store minutes or hours earlier, with no notification that anything changed. Interfaces that mutate after announcement cannot be cached, which would defeat retained About as a discovery mechanism.
+When a component changes its interface it MUST publish an About reflecting the change. A partial About carrying only the affected subtree is sufficient (section 4.4). Consumers subscribed at that moment converge immediately; consumers that were not listening detect the change the next time they reconcile through `?/Sync` (section 4.9).
 
-Implementations that let an application compose Channel commands or attach data sources therefore MUST require that composition to be complete before connecting. Any attempt to alter the interface after the first About publish MUST fail rather than silently republish a different interface.
+**Consumers MUST NOT assume a cached interface is still current.** Before relying on a cached description for anything consequential -- invoking a command, sizing a buffer, validating a payload -- a consumer SHOULD reconcile, and MUST be prepared for the interface to have changed since it last looked.
 
-`config` and `status` are explicitly **not** part of the interface and are expected to change at runtime. Partial About updates that carry only `status` (section 10.5) do not violate this rule.
+Changing an interface is nonetheless disruptive: a consumer that validated a payload against the old schema and published to a command topic gets no error, because command rejection is silent on the command's own topics (section 7.7). A component SHOULD therefore treat interface mutation as a development-time affordance -- adding a channel while prototyping, reloading a plugin -- rather than a routine runtime operation, and SHOULD prefer additive changes, since a consumer holding a stale description of a widened interface still works.
+
+`config` and `status` are not part of the interface and are expected to change at runtime.
+
+**Design note -- why the freeze was withdrawn (changed in A3.0):** A2.1 forbade any interface change after the first About publish. The stated reason was cacheability, but the real constraint was that `@/About` was retained and a partial publish destroyed the retained description (section 4.4). What could not be cached was a *partial* retained About, not a *changed* one. With About unretained and `?/Sync` providing staleness detection, the two invariants that actually matter -- that the retained record is always complete, and that consumers can tell when their copy is stale -- are satisfied without forbidding change. The freeze was doing a job that belonged to the topic layout.
+
+### 4.8 Status
+
+*(A3.0)* Every Service and Node publishes a **retained** presence record on `{componentId}/@/Status`, QoS 1. It is deliberately tiny and fixed in shape:
+
+```json
+{
+  "lynxType": "Service",
+  "connected": true
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lynxType` | string | `"Service"` or `"Node"`. Lets a consumer file the component without having read its About. |
+| `connected` | boolean | Whether the component is connected to its broker. |
+
+Status carries nothing else. It is not a summary of the component's `status` object, which stays in About -- it answers only "does this component exist, and is it up." Keeping it fixed and small is what makes it safe to retain: the payload never grows with the size of the interface, and it is small enough that it is always published whole, so the failure mode that motivated unretaining About cannot recur here.
+
+The set of retained Status messages is the network roster. A consumer subscribing to `+/@/Status` receives one immediately for every component that has ever announced itself on that broker, including components that are currently down.
+
+Status is the Last Will topic (section 10.5). A graceful shutdown MAY instead publish a zero-length retained message to `@/Status`, which clears the retained record and removes the component from the roster entirely. The two are distinct signals: `connected: false` means *known and down*, an absent record means *gone*.
+
+#### Liveness is transitive
+
+A component is reachable only if it and **every Node between it and the observer** are connected. When a Node's uplink drops, the retained Status records that Node relayed upward remain in the ancestor's store saying `connected: true`, because those components did not fail -- the link did.
+
+**A consumer MUST treat a component as unreachable if any ancestor's `connected` is false**, regardless of the component's own record, and MUST treat any cached About for that subtree as stale. This also disposes of the stale-`status.command` problem: a consumer holding a description that says a channel is streaming stops trusting it the moment an ancestor goes down.
+
+### 4.9 Sync
+
+*(A3.0)* `?/Sync` lets a consumer find *where* its cached copy of a component's About differs from the current one, without transferring the whole payload. It answers location, not content: having located a difference, the consumer fetches the new value with `?/About` and `contents` (section 4.5).
+
+**Request.** A JSON object mirroring the shape of the subtree being compared, whose values are xxh32 digests of what the consumer currently holds:
+
+```json
+{ "config": "a410eb11" }
+```
+
+**Reply**, published on `@/Sync`. If every supplied digest matches, the reply is `{}`. Otherwise the responder descends one level into each differing key:
+
+```json
+{
+  "config": {
+    "someObjectField": "148193ac",
+    "somePrimitiveField": 46
+  }
+}
+```
+
+The consumer compares again and issues a further `?/Sync` for whichever keys still differ, walking down until it has located the changes.
+
+#### Encoding
+
+The reply distinguishes hashes from values **positionally**:
+
+| Value type at that key | Reply carries |
+|------------------------|---------------|
+| object | its xxh32 digest, as a hex string |
+| array | its xxh32 digest, as a hex string. Arrays are opaque -- Sync never descends into one. |
+| string, number, boolean, null | the value itself |
+
+Returning scalars directly saves a round trip at the leaves, where a digest would be larger than the value it stands for.
+
+This encoding is ambiguous in one case: if the consumer holds an object at some key and the component has since replaced it with a string, the consumer cannot tell the new string value from a digest. **On any type mismatch between the cached copy and the reply, a consumer MUST stop descending and re-fetch that subtree in full** rather than interpreting the value. The rare case costs one round trip instead of producing a silently wrong result.
+
+#### Generations
+
+A walk takes several round trips, and the component's data may change midway, leaving the consumer with a mixture of two versions that matches neither. Every Sync reply therefore carries a `generation` counter, incremented by the component whenever its About changes. A consumer that sees the generation change mid-walk MUST discard what it has assembled and restart.
+
+`generation` is reserved at the **top level of a Sync reply only**, where it cannot collide: the top-level keys of an About are protocol-defined (`lynxType`, `docs`, `config`, `status`, `endpoints`, `channels`, `services`, `childNodes`) and `generation` is not among them. At any deeper level the key carries no special meaning and is compared like any other.
+
+#### Canonicalization
+
+Digests are xxh32 over the [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) JSON Canonicalization Scheme serialization of the value: object keys sorted by code point, no insignificant whitespace, and numbers in the shortest round-tripping form. Every subtree at every level must hash identically across implementations, so this is not optional -- an SDK that canonicalizes differently produces digests that never match, which presents as a sync that never converges rather than as an error.
+
+Digests are computed over the payload **in the publisher's local frame** (section 4.10). A consumer that has re-rooted topic strings for its own use MUST un-root them before hashing.
+
+#### When to use it
+
+Sync exists for a Node reconciling its subtree aggregate across a flapping or low-bandwidth uplink, where re-sending an entire subtree description on every reconnect is what the link cannot absorb. A Node always reconciles across exactly one bridge, so each round trip is a single hop.
+
+It is available to any consumer, but it is not automatically the cheaper option. A multi-round-trip walk beats a single full fetch only when the payload is large relative to the per-message overhead and the differences are small. For a description of a few kilobytes, requesting the whole thing is usually both simpler and faster. A responder MAY collapse the walk by returning values instead of digests when a differing subtree is small enough that descending further would cost more than sending it.
+
+### 4.10 The Local Frame
+
+*(A3.0)* **A component publishes as though it were alone on its broker.** Its own topics begin with its own id, and every topic string inside its About -- the keys of `endpoints`, the entries of `replyTopics` -- is written in that frame. A component never knows or states where it sits in the network hierarchy.
+
+Relaying is what introduces the hierarchy (section 5.4). A Node forwards its layer upward with its own id prepended, so a description published by `SC1` as `SC1/@/About` arrives two layers up on `B/C/SC1/@/About`. The payload is unchanged: it still says `SC1/cpuLoad/!/Stream` inside.
+
+**A consumer MUST re-root the topics in an About by the prefix the About arrived on.** Having received the above on `B/C/SC1/@/About`, the prefix is `B/C/` and the command topic to publish to is `B/C/SC1/cpuLoad/!/Stream`. Section 4.6 restricts `replyTopics` to the component's own namespace precisely so that this rewrite is always well-defined.
+
+Two consequences worth stating plainly. Digests are computed before re-rooting (section 4.9), so a consumer must un-root a cached copy before comparing. And a component's About is byte-identical no matter who reads it or how far away they are, which is what lets a Node cache and forward a child's description without rewriting it.
 
 ---
 
@@ -263,8 +381,8 @@ Lynx uses symbolic prefixes in topic segments to distinguish system topics from 
 
 | Prefix | Name | Meaning | Example |
 |--------|------|---------|---------|
-| `@` | System | Published by the component automatically (About, Notice) | `deviceWatcher/@/About` |
-| `?` | Query | Subscribe to receive a query; response published on `@` | `deviceWatcher/?/About` |
+| `@` | System | Published by the component automatically (Status, About, Sync, Notice) | `deviceWatcher/@/Status` |
+| `?` | Query | Subscribe to receive a query; response published on the matching `@` topic | `deviceWatcher/?/About` |
 | `!` | Command | Channel commands: the built-ins `Poll`, `Stream`, `Stop`, or application-defined actions | `deviceWatcher/cpuLoad/!/Stream` |
 | `<` | Output | Channel data output | `deviceWatcher/cpuLoad/<` |
 
@@ -275,8 +393,11 @@ For a service `deviceWatcher` with channels `cpuLoad` and `memory`:
 ```mermaid
 graph LR
     subgraph service ["deviceWatcher"]
+        SysStatus["@/Status"]
         SysAbout["@/About"]
         QueryAbout["?/About"]
+        SysSync["@/Sync"]
+        QuerySync["?/Sync"]
         SysNotice["@/Notice"]
     end
 
@@ -299,8 +420,11 @@ The full topic strings for this service are:
 
 | Topic | Direction | QoS | Retained | Purpose |
 |-------|-----------|-----|----------|---------|
-| `deviceWatcher/@/About` | pub | 1 | yes | Service self-description |
+| `deviceWatcher/@/Status` | pub | 1 | **yes** | Presence record: exists, and is it connected |
+| `deviceWatcher/@/About` | pub | 1 | no | Service self-description, full or partial |
 | `deviceWatcher/?/About` | sub | -- | -- | Query service info |
+| `deviceWatcher/@/Sync` | pub | 1 | no | Hash reconciliation reply |
+| `deviceWatcher/?/Sync` | sub | -- | -- | Hash reconciliation request |
 | `deviceWatcher/@/Notice` | pub | 1 | no | Log/alert messages |
 | `deviceWatcher/cpuLoad/!/Poll` | sub | -- | -- | Produce one sample immediately |
 | `deviceWatcher/cpuLoad/!/Stream` | sub | -- | -- | Start continuous sampling |
@@ -317,9 +441,77 @@ Both Channels above happen to expose the same commands. That is a property of th
 
 - **Service endpoints**: `{serviceId}/{prefix}/{action}` -- e.g., `deviceWatcher/@/About`
 - **Channel endpoints**: `{serviceId}/{channelId}/{prefix}/{action}` -- e.g., `deviceWatcher/cpuLoad/!/Stream`
-- **Node endpoints**: the Node's own About uses `{nodeId}/@/About`, but the monitor endpoint subscribes to `+/@/About` (a wildcard that catches all direct children).
+- **Node endpoints**: the Node's own topics use `{nodeId}/{prefix}/{action}`, and its monitor endpoints subscribe to `+/@/Status` and `+/@/About` -- wildcards that catch every component one level down, which on a Node's own broker is exactly its direct children.
 
 Component and channel IDs, and command actions, each occupy exactly one topic segment: they MUST NOT be empty, MUST NOT contain `/`, and MUST NOT contain the MQTT wildcards `+` or `#`.
+
+All of the above are written in the publishing component's **local frame** (section 4.10). Depth beyond these forms appears only through relaying, described next.
+
+### 5.4 Network Hierarchy and Relaying
+
+*(A3.0)* **Every Node owns a broker.** Services and child Nodes connect to it as ordinary clients and publish self-rooted topics, knowing nothing about the wider network. A Node joins its layer to the layer above by bridging to its parent Node's broker.
+
+A Node relays in two directions:
+
+| Direction | Rule |
+|-----------|------|
+| **Upward** | Everything published on the Node's own layer is forwarded to the parent, with the Node's own id prepended. |
+| **Downward** | The Node subscribes on its parent's broker to `{ownId}/#`, strips that prefix, and republishes locally. |
+
+Upward flow is unconditional by default; downward flow is addressed only. A message travels down a branch solely because a sender named that branch in the topic.
+
+#### Worked example
+
+Nodes `A`, `B`, and `C`, where `B` is a child of `A` and `C` is a child of `B`. `SA1` is connected to A's broker, `SB1` and `SB2` to B's, `SC1` to C's.
+
+```mermaid
+graph TD
+    A["Node A -- broker"] --- SA1["SA1"]
+    A --- B["Node B -- broker"]
+    B --- SB1["SB1"]
+    B --- SB2["SB2"]
+    B --- C["Node C -- broker"]
+    C --- SC1["SC1"]
+```
+
+`SB1` publishes `SB1/@/About`. Who sees what:
+
+| Observer | Topic it sees | Why |
+|----------|---------------|-----|
+| `SB2` | `SB1/@/About` | Same broker, no relay involved. |
+| `B` | `SB1/@/About` | Same broker. |
+| `SA1` | `B/SB1/@/About` | B forwarded it upward with its own id prepended. |
+| `SC1` | *nothing* | Downward flow is addressed only, and nothing addressed it into C. |
+
+For `SA1` to query `SC1`, it publishes to `B/C/SC1/?/About`. B's downward subscription `B/#` matches, so B strips `B/` and republishes `C/SC1/?/About` on its own broker; C's `C/#` subscription matches, so C strips `C/` and republishes `SC1/?/About`, which `SC1` receives as an ordinary local request. `SC1` replies on `SC1/@/About`, which travels back up gaining `C/` and then `B/`, reaching `SA1` as `B/C/SC1/@/About`.
+
+#### Implementation
+
+The relay is expressible as one Mosquitto bridge directive on the child. On B:
+
+```
+connection B-to-A
+address a.host:1883
+topic # both 0 "" B/
+```
+
+Outbound, the bridge subscribes locally to `#` and republishes to A with `B/` prepended; inbound, it subscribes to `B/#` on A and republishes locally with the prefix stripped. Mosquitto does not send a message back out the connection it arrived on, which is what prevents the two rules from feeding each other.
+
+An implementation that relays at the application layer instead of by bridge configuration MUST provide equivalent loop suppression -- in MQTT v5, the **No Local** subscription option on both subscriptions; in 3.1.1, which has no such option, an explicit direction marker carried in the User Properties.
+
+Relays MUST preserve the original QoS, the retain flag, and the MQTT v5 User Properties. Preserving retain is what allows a retained `@/Status` to reach ancestors at all; preserving User Properties is what keeps the original publish timestamp (section 9.1) intact rather than replacing it with the relay time.
+
+#### Consequences
+
+**QoS is per hop, not end to end.** Each relay is a fresh publish. A QoS 1 message crossing two Nodes is delivered at-least-once three times independently, which widens the window for duplicates; `<` data at QoS 0 sheds more readily with each hop. A consumer needing end-to-end delivery guarantees must build them above Lynx.
+
+**Wildcard subscriptions do not cross depths.** MQTT has no "any depth" wildcard -- `#` is terminal-only -- so `+/@/Status` matches one level and nothing deeper. This is why a Node's About aggregates its whole subtree (section 8.2): a consumer reads its neighbours directly at depth 1 and everything below through the Node that already collected it.
+
+**Everything converges upward.** Because upward flow is unconditional, a root Node's broker carries every message published anywhere beneath it, including all channel data. At maker scale this is usually acceptable, and it is what makes the reply path work without extra machinery: a command addressed down a branch produces data that flows back up by the default rule. A Node MAY narrow what it forwards, which is a Node configuration matter rather than something a Service can control for itself. The mechanism for expressing that policy is not yet specified.
+
+**Cycles are not detected.** Configuring a Node's parent as one of its own descendants produces unbounded prefix growth. Nothing in the protocol catches this; it is a deployment error that surfaces immediately in testing.
+
+**Ids must be unique within a layer.** A Node's local component ids and its child Node ids share one topic namespace. A Service named `C` with a channel named `SC1` produces `C/SC1/...`, indistinguishable from Node `C`'s service `SC1`. Within one broker, ids MUST be unique across Services and child Nodes.
 
 ---
 
@@ -329,20 +521,29 @@ A Service is the primary application-level component in Lynx. It represents a si
 
 ### 6.1 Service Endpoints
 
-Every Service automatically creates three endpoints:
+Every Service automatically creates these endpoints:
 
-**`{serviceId}/@/About`** (pub, QoS 1, retained)
-Publishes the full self-description on connect and whenever state changes.
+**`{serviceId}/@/Status`** (pub, QoS 1, **retained**)
+The presence record (section 4.8). Published on connect, and set as the Last Will so that the broker publishes `connected: false` if the Service drops.
+
+**`{serviceId}/@/About`** (pub, QoS 1, not retained)
+Publishes the self-description, in full or as a partial carrying only what changed. Published on connect, in reply to `?/About`, and whenever the Service announces a change.
 
 **`{serviceId}/?/About`** (sub)
 Receives queries. When a message arrives, the Service produces its About, optionally trims it by the `contents` parameter in the request, and publishes a single message to `@/About`. This is declared via `replyTopics: ["{serviceId}/@/About"]`.
+
+**`{serviceId}/@/Sync`** (pub, QoS 1, not retained)
+Publishes hash reconciliation replies (section 4.9).
+
+**`{serviceId}/?/Sync`** (sub)
+Receives reconciliation requests. Declared via `replyTopics: ["{serviceId}/@/Sync"]`.
 
 **`{serviceId}/@/Notice`** (pub, QoS 1, not retained)
 Publishes log-level notices (DEBUG through CRITICAL) as structured JSON.
 
 ### 6.2 About Payload
 
-The `@/About` payload for a Service looks like this. `?/About` is shown with its schema in full; elsewhere `payload_schema` bodies are abbreviated as `{ ... }` for readability. Note that `{}` is a *valid* schema meaning "accept anything", so it is never used as an elision marker.
+The `@/About` payload for a Service looks like this. It is published **not retained** (section 4.4), and a Service MAY publish any subtree of it as a partial. `?/About` is shown with its schema in full; elsewhere `payload_schema` bodies are abbreviated as `{ ... }` for readability. Note that `{}` is a *valid* schema meaning "accept anything", so it is never used as an elision marker.
 
 ```json
 {
@@ -351,7 +552,7 @@ The `@/About` payload for a Service looks like this. `?/About` is shown with its
     "id": "deviceWatcher",
     "title": "Device Watcher",
     "description": "Watches the device running this service and publishes statistics.",
-    "lynx_version": "A2.1",
+    "lynx_version": "A3.0",
     "time_source": "unix"
   },
   "config": {},
@@ -359,6 +560,12 @@ The `@/About` payload for a Service looks like this. `?/About` is shown with its
     "connected": true
   },
   "endpoints": {
+    "deviceWatcher/@/Status": {
+      "endpoint_direction": "pub",
+      "description": "Publish the retained presence record for the Component.",
+      "payload_schema": { ... },
+      "additionalProperties": false
+    },
     "deviceWatcher/@/About": {
       "endpoint_direction": "pub",
       "description": "Publish information about the Component.",
@@ -384,6 +591,19 @@ The `@/About` payload for a Service looks like this. `?/About` is shown with its
       "additionalProperties": false,
       "replyTopics": ["deviceWatcher/@/About"]
     },
+    "deviceWatcher/@/Sync": {
+      "endpoint_direction": "pub",
+      "description": "Publish a hash reconciliation reply.",
+      "payload_schema": { ... },
+      "additionalProperties": true
+    },
+    "deviceWatcher/?/Sync": {
+      "endpoint_direction": "sub",
+      "description": "Compare cached digests against the Component's current About.",
+      "payload_schema": { ... },
+      "additionalProperties": true,
+      "replyTopics": ["deviceWatcher/@/Sync"]
+    },
     "deviceWatcher/@/Notice": {
       "endpoint_direction": "pub",
       "description": "Publish a notice about the Component.",
@@ -394,7 +614,7 @@ The `@/About` payload for a Service looks like this. `?/About` is shown with its
   "channels": {
     "cpuLoad": {
       "lynxType": "Channel",
-      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A2.1" },
+      "docs": { "id": "cpuLoad", "title": "CPU Load", "description": "Polls the CPU load", "lynx_version": "A3.0" },
       "config": {},
       "status": {
         "command": null
@@ -446,12 +666,12 @@ Key sections:
 | `docs` | Immutable | Identity metadata: `id`, `title`, `description`, `lynx_version`, `time_source`. |
 | `config` | Mutable | Runtime configuration. Application-defined. |
 | `status` | Mutable | Current `connected` state. |
-| `endpoints` | Immutable | Map of topic string to endpoint metadata (direction, schema, `additionalProperties`, description, and optional `replyTopics` / `dataOutput`). Fixed once announced; see section 4.7. |
-| `channels` | Mixed | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). The set of channels and their endpoints is immutable; their `config` and `status` are not. |
+| `endpoints` | Mutable, but stable by convention | Map of topic string to endpoint metadata (direction, schema, `additionalProperties`, description, and optional `replyTopics` / `dataOutput`). Topic keys are in the local frame (section 4.10). May change while connected, subject to section 4.7. |
+| `channels` | Mutable | Map of channel ID to channel About (each channel has its own docs/config/status/endpoints). |
 
 ### 6.3 Service Lifecycle
 
-A Service passes through three phases: **compose**, during which its interface is defined; **announce**, which connects and publishes About; and **serve**, during which it handles requests and produces data.
+A Service passes through three phases: **compose**, during which its interface is defined; **announce**, which connects and publishes its presence and description; and **serve**, during which it handles requests and produces data.
 
 ```mermaid
 sequenceDiagram
@@ -459,25 +679,25 @@ sequenceDiagram
     participant B as MQTT Broker
 
     Note over S: "Compose - declare channels, commands, schemas"
-    Note over S: "Interface is now frozen - see 4.7"
 
-    S->>B: "Set LWT: {serviceId}/@/About = status.connected false, retained"
+    S->>B: "Set LWT: {serviceId}/@/Status = connected false, retained"
     S->>B: CONNECT
     B-->>S: CONNACK
     S->>B: "SUBSCRIBE {serviceId}/#"
-    S->>B: "PUBLISH {serviceId}/@/About - retained, QoS 1"
-    Note over S,B: Service is now live and discoverable
+    S->>B: "PUBLISH {serviceId}/@/Status - retained, QoS 1"
+    S->>B: "PUBLISH {serviceId}/@/About - not retained, QoS 1"
+    Note over S,B: Service is now on the roster and discoverable
 
     loop Serve
-        B-->>S: "Requests on ?/About and channel command topics"
-        S->>B: "About, Notice, and channel data"
+        B-->>S: "Requests on ?/About, ?/Sync, and channel command topics"
+        S->>B: "About, Sync, Notice, and channel data"
     end
 
     Note over S,B: On unexpected disconnect
-    B->>B: "Broker publishes LWT to {serviceId}/@/About"
+    B->>B: "Broker publishes LWT to {serviceId}/@/Status"
 ```
 
-The interface MUST be complete before the About publish, and MUST NOT change afterwards (section 4.7). Everything a Service will ever advertise is therefore settled during compose.
+The first About SHOULD be complete, since it is what a listening consumer caches. Later publishes may be partial. A Service MAY alter its interface after announcing it, subject to section 4.7 -- an implementation that permits this MUST publish an About reflecting the change.
 
 **Execution ownership is out of scope.** This specification does not say what drives the serve phase. An implementation MAY own a thread and block the caller, MAY integrate with an application's existing event loop, or MAY require the application to call into it periodically. What matters is only that the obligations defined elsewhere are met on time: batch flush deadlines (section 7.6), MQTT keepalive, and prompt handling of `!/Stop`. A component that cannot meet them because nothing is servicing its runtime is non-conformant regardless of how it is scheduled.
 
@@ -532,7 +752,7 @@ Composition is constrained. Every Channel MUST satisfy all of the following:
 
 A Channel with no `<` endpoint is legal: a Channel may exist solely to accept commands that act on a device and acknowledge on other topics via `replyTopics`.
 
-Interfaces are fixed once announced; see section 4.7.
+A Channel's interface is expected to stay stable for the life of its Service, but is no longer required to; see section 4.7.
 
 #### Discovering a Channel's capabilities
 
@@ -780,7 +1000,13 @@ While a command is active, a Channel receiving a request that would start anothe
 
 Rejection is silent on the command's own topics. In particular a rejected `!/Stream` produces no message on `<` and no `@/About`, despite `!/Stream` declaring `replyTopics: ["{serviceId}/@/About"]` -- that declaration describes the nominal flow, and a rejection is not the nominal flow.
 
-A client determines whether a Channel is busy by reading `status.command` in About, which is `null` when the Channel is idle and an object naming the active command otherwise. Because `!/Stream` publishes About when it starts and when it ends, a subscriber to `@/About` sees each transition.
+A client determines whether a Channel is busy by reading `status.command` in About, which is `null` when the Channel is idle and an object naming the active command otherwise. Because `!/Stream` publishes About when it starts and when it ends, a subscriber to `@/About` sees each transition. These publishes are typically partial Abouts carrying only the affected channel's status, which is safe because About is not retained (section 4.4):
+
+```json
+{ "channels": { "cpuLoad": { "status": { "command": null } } } }
+```
+
+A client that was not subscribed at the moment of a transition has no retained copy to read, and MUST query `?/About` to learn the current state.
 
 `!/Poll` on a busy Channel is a distinct case that this specification does not constrain: Poll does not compete for `status.command`, so a Channel MAY serve it concurrently with an active Stream, or MAY reject it as above. A Channel SHOULD document its behavior in the endpoint's `description`.
 
@@ -810,11 +1036,7 @@ Select specific keys. Each key maps to its own `contents` rule (can nest dicts f
 
 On a Stream, `contents` is applied **before** a sample enters the open batch. A sample that trims to `{}` is discarded: it is not published, and it does not count toward `batch.maxSamples` or `numSamples`. The same empty-object rule applies at the top level: a Stream with `"contents": {}` admits no samples.
 
-**String mode (xxhash):**
-```json
-"a3b2c1d0"
-```
-The string is interpreted as an xxh32 hex digest. The payload is hashed and compared. If it matches, nothing is returned (no change). If it differs, the new hash (or the full payload) is returned.
+*(A3.0)* The A2.1 string mode, in which `contents` carried an xxh32 digest, is withdrawn. Use `?/Sync` (section 4.9) to compare digests and `contents` to select what to fetch once a difference is located.
 
 ### 7.9 Data Sources
 
@@ -873,20 +1095,28 @@ The `motion` Channel advertises `!/Stream`, `!/Stop`, and `<`, but not `!/Poll`:
 
 ## 8. Nodes
 
-A Node is a broker-adjacent component that monitors the Lynx network. It tracks which Services are connected, their status, and the status of their Channels. Nodes form the topology layer of Lynx.
+A Node owns a broker and monitors everything connected to it. It tracks which Services are connected, their status, and the status of their Channels, and it joins its layer to the layer above by relaying (section 5.4). Nodes form the topology layer of Lynx.
+
+*(A3.0)* A Node plays two roles that are worth keeping distinct. As a **relay** it carries messages between its broker and its parent's, which is transport and is normally configured as an MQTT bridge rather than implemented in Lynx code. As a **component** it is an ordinary Lynx client of its own broker, with the endpoints below, and it never publishes to its parent directly -- it publishes locally and the relay carries it up.
 
 ### 8.1 Node Endpoints
 
 A Node creates these endpoints:
 
-| Endpoint | Direction | Purpose |
-|----------|-----------|---------|
-| `{nodeId}/@/About` | pub | Node self-description (retained) |
-| `{nodeId}/?/About` | sub | Query node info |
-| `{nodeId}/@/Notice` | pub | Log/alert messages |
-| `+/@/About` | sub | Wildcard monitor: catch About messages from all direct children |
+| Endpoint | Direction | Retained | Purpose |
+|----------|-----------|----------|---------|
+| `{nodeId}/@/Status` | pub | yes | Presence record (section 4.8) |
+| `{nodeId}/@/About` | pub | no | Node self-description, including the subtree aggregate |
+| `{nodeId}/?/About` | sub | -- | Query node info |
+| `{nodeId}/@/Sync` | pub | no | Hash reconciliation reply |
+| `{nodeId}/?/Sync` | sub | -- | Hash reconciliation request |
+| `{nodeId}/@/Notice` | pub | no | Log/alert messages |
+| `+/@/Status` | sub | -- | Wildcard monitor: presence records from all direct children |
+| `+/@/About` | sub | -- | Wildcard monitor: descriptions from all direct children |
 
-The `+/@/About` subscription uses the MQTT `+` single-level wildcard to match any component ID at one topic level. This means a Node sees the About messages of all Services and child Nodes connected to the same broker.
+The `+` single-level wildcard matches any component id at one topic level. On a Node's own broker that is exactly its direct children -- Services and child Nodes connected to it -- because anything deeper arrives already prefixed by the child Node that relayed it (section 5.4).
+
+A Node populates its NetworkState from `+/@/Status` and `+/@/About`. Status alone is enough to know that a child exists and whether it is up; the Node requests or receives About to fill in the description.
 
 ### 8.2 Node About Payload
 
@@ -899,7 +1129,7 @@ A Node's About extends the base About with `services` and `childNodes`:
     "id": "edgeNode01",
     "title": "Edge Node 01",
     "description": "Monitors sensors on floor 3.",
-    "lynx_version": "A2.1",
+    "lynx_version": "A3.0",
     "time_source": "unix"
   },
   "config": {},
@@ -926,6 +1156,12 @@ A Node's About extends the base About with `services` and `childNodes`:
       "payload_schema": { ... },
       "additionalProperties": false
     },
+    "+/@/Status": {
+      "endpoint_direction": "sub",
+      "description": "Monitor presence records from child nodes and services.",
+      "payload_schema": { ... },
+      "additionalProperties": true
+    },
     "+/@/About": {
       "endpoint_direction": "sub",
       "description": "Monitor about messages from child nodes and services.",
@@ -945,11 +1181,15 @@ A Node's About extends the base About with `services` and `childNodes`:
 }
 ```
 
-The `services` and `childNodes` maps are populated automatically as the Node receives About messages on `+/@/About`.
+The `services` and `childNodes` maps are populated automatically as the Node receives Status and About messages from its direct children. Entries under them are stored **in each child's own local frame** (section 4.10): the Node does not rewrite the topics inside a child's About, so a consumer reading the aggregate re-roots each entry by the path at which it appears.
+
+*(A3.0)* **The aggregate is what makes depth work.** MQTT wildcards match a fixed number of levels, so no subscription reaches arbitrarily deep. A consumer instead reads its immediate neighbours directly and everything below them through the Node that already collected it: one `?/About` to a Node returns its entire subtree.
+
+The cost is that a Node's About changes whenever anything anywhere beneath it changes, so it is a poor thing to re-fetch whole. This is the case `?/Sync` (section 4.9) exists for: a consumer reconciles by walking into `services` and `childNodes`, which locates the changed component without transferring the rest of the tree.
 
 ### 8.3 Multi-Node Topology
 
-Nodes can be nested. A parent Node can track child Nodes, each of which tracks their own Services:
+Nodes can be nested. Each Node owns a broker; a child Node is a client of its parent's broker and relays between the two (section 5.4). A parent Node tracks its child Nodes, each of which tracks their own Services:
 
 ```mermaid
 graph TD
@@ -966,6 +1206,8 @@ graph TD
     ChildNode1 --- ServiceB
     ChildNode2 --- ServiceC
 ```
+
+Every component still publishes self-rooted (section 4.10). The depth in the diagram appears on the wire only because each Node prepends its own id on the way up, so `serviceC`'s description reaches the parent Node as `childNode2/serviceC/@/About`.
 
 Each Node maintains a **NetworkState** -- a hierarchical in-memory model of the network tree beneath it:
 
@@ -993,7 +1235,7 @@ node = Node(
     id="exampleNode",
     title="Example Node",
     description="Example Node for Lynx.",
-    lynx_version="A2.1")
+    lynx_version="A3.0")
 
 if __name__ == "__main__":
     node.start()
@@ -1055,14 +1297,21 @@ The SDK automatically selects the appropriate TimeSource by checking `time.gmtim
 
 ## 10. Discovery and Network State
 
-### 10.1 Retained About as a Service Registry
+### 10.1 Retained Status as a Service Registry
 
-When a Service connects, it publishes its full About payload to `{serviceId}/@/About` with `retain=True` and `QoS=1`. This means:
+*(A3.0)* When a Service connects, it publishes its presence record to `{serviceId}/@/Status` with `retain=True` and `QoS=1` (section 4.8). This means:
 
-- Any client that subscribes to `{serviceId}/@/About` or `+/@/About` immediately receives the last known state, even if the Service published it hours ago.
-- The broker stores exactly one retained About per Service, so the retained message store grows linearly with the number of Services.
+- Any client that subscribes to `+/@/Status` immediately receives one small record per component, even for components that published hours ago or are currently down.
+- The broker stores one fixed-size record per component, so the retained store grows linearly with the number of components and does not grow with the size of their interfaces.
 
-This effectively turns the broker into a **service registry** with no additional infrastructure.
+This turns the broker into a **service registry** with no additional infrastructure. The registry answers only *who is there*; descriptions are fetched separately with `?/About`.
+
+Discovery is therefore two steps:
+
+1. Subscribe to `+/@/Status`. The retained records arrive immediately and give the roster, each entry naming its `lynxType`.
+2. For each component of interest, request its description on `?/About`, or -- for anything more than one level away -- read the aggregate from the Node between you and it (section 8.2).
+
+**Design note -- what this trades (changed in A3.0):** in A2.1 the broker served a complete description from cache with no involvement from the component, so discovery cost the network nothing. Now the roster is cheap but each description is a request-response exchange. That is the better trade when descriptions are large and read rarely, and the worse one when many observers join at once, since each arrival provokes a burst of About publishes. Nodes absorb the burst by answering for their whole subtree from an aggregate they already hold.
 
 ### 10.2 Querying with `?/About`
 
@@ -1098,18 +1347,29 @@ sequenceDiagram
     participant S1 as Service 1
     participant S2 as Service 2
 
-    S1->>B: PUBLISH s1/@/About (retained)
-    S2->>B: PUBLISH s2/@/About (retained)
+    S1->>B: "PUBLISH s1/@/Status (retained)"
+    S1->>B: "PUBLISH s1/@/About (not retained)"
+    S2->>B: "PUBLISH s2/@/Status (retained)"
+    S2->>B: "PUBLISH s2/@/About (not retained)"
 
-    Observer->>B: SUBSCRIBE +/@/About
-    B-->>Observer: s1/@/About (retained copy)
-    B-->>Observer: s2/@/About (retained copy)
+    Observer->>B: "SUBSCRIBE +/@/Status and +/@/About"
+    B-->>Observer: "s1/@/Status (retained copy)"
+    B-->>Observer: "s2/@/Status (retained copy)"
 
-    Note over Observer: Observer now knows about both services
+    Note over Observer: "Roster known. Descriptions not yet."
 
-    S1->>B: PUBLISH s1/@/About (status changed)
-    B-->>Observer: s1/@/About (live update)
+    Observer->>B: "PUBLISH s1/?/About {}"
+    B->>S1: "?/About"
+    S1->>B: "PUBLISH s1/@/About"
+    B-->>Observer: "s1/@/About"
+
+    Note over Observer: "Observer now has s1's description"
+
+    S1->>B: "PUBLISH s1/@/About (partial - status changed)"
+    B-->>Observer: "s1/@/About (live update, merged onto cache)"
 ```
+
+The Observer subscribed to `+/@/About` as well as `+/@/Status`, which is why it receives the live partial update in the last step. An observer that only polls will not see transitions as they happen and must reconcile (section 4.9) or re-query.
 
 ### 10.4 NetworkState
 
@@ -1130,23 +1390,35 @@ Nodes (and optionally Services with `track_network_state=True`) maintain a `Netw
 }
 ```
 
-Every incoming About message on `+/@/About` is parsed, and the component is placed into the appropriate branch based on its `lynxType`:
+Every incoming Status and About message is parsed, and the component is placed into the appropriate branch based on its `lynxType`:
 
 - `"Service"` -> `services[id]`
 - `"Node"` -> `childNodes[id]`
 
-`lynxType` is authoritative. A Node About contains both `services` and `childNodes`, so payload-key sniffing is not a substitute. When `lynxType` is absent, a payload containing `channels` is treated as a Service and a payload containing `childNodes` is treated as a Node.
+`lynxType` is authoritative, and appears on both Status and About. It is on Status specifically so that a component can be filed before any description has been seen -- an observer that joins after a Service has died still records that it exists and is down, rather than dropping it.
+
+A full About replaces the entry's description; a partial About is merged onto it. A partial for a component with no existing entry MUST be ignored and a full About requested instead (section 4.4).
 
 ### 10.5 Last Will and Testament (LWT)
 
-When a Service or Node connects, it sets an MQTT Last Will:
+*(A3.0)* When a Service or Node connects, it sets an MQTT Last Will:
 
-- **Topic**: `{componentId}/@/About`
-- **Payload**: `{"status":{ "connected": false }}`
+- **Topic**: `{componentId}/@/Status`
+- **Payload**: `{"lynxType": "Service", "connected": false}`
 - **QoS**: 1
 - **Retain**: true
 
-If the client disconnects unexpectedly, the broker publishes this LWT message. NetworkState handles it as a **partial About update** -- it merges the `status` into the existing entry without replacing the full About.
+If the client disconnects unexpectedly, the broker publishes it, and the component's roster entry flips to disconnected while remaining present. The will targets `@/Status` rather than `@/About` so that it replaces a small record that is meant to be replaced, instead of overwriting the component's description as it did in A2.1.
+
+A graceful shutdown MAY additionally publish a zero-length retained message to `@/Status`, removing the component from the roster entirely (section 4.8).
+
+#### What a will cannot say
+
+A will is fixed at connect time, so it cannot describe state that only exists later -- in particular it cannot report which Channels were mid-stream when the component died. Consumers do not need it to: `connected: false` invalidates every cached description for that component, including any `status.command` it contained. The rule that makes this work across layers is transitive liveness (section 4.8): when a Node's uplink drops, its own will fires, and every component beneath it becomes unreachable even though their own retained records still read `connected: true`.
+
+#### Reconnection
+
+When a Node re-establishes its uplink, the retained records it relayed upward may be stale or absent. The Node MUST republish its subtree's presence records upward on reconnect, preserving the retain flag, so that the ancestor's view converges. Implementations that relay by MQTT bridge should verify that their broker does this on a remote-only reconnect rather than assuming it; if it does not, the ancestor's roster silently decays until each component next publishes.
 
 ---
 
@@ -1188,9 +1460,41 @@ Published to `{componentId}/@/Notice` (QoS 1, not retained):
 
 In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging` module to MQTT notices. Any log message at INFO or above is automatically published as a Notice, with the log record's timestamp preserved in the MQTT v5 User Properties.
 
+### 11.4 Notices Across Layers
+
+*(A3.0)* Notices are relayed upward like any other message (section 5.4), so every Notice published anywhere in a tree reaches the root. With the Python bridge publishing everything at INFO and above, that is the entire network's logging converging on one broker.
+
+A Node MAY apply a severity floor to Notices it forwards upward, relaying `WARNING` and above by default while keeping `DEBUG` and `INFO` local. A Node that filters SHOULD say so in its `config`, so that an observer can tell the difference between a quiet subtree and a filtered one.
+
 ---
 
 ## Appendix A: JSON Schemas
+
+### A.0 Status (`@/Status`)
+
+*(A3.0)* The retained presence record (section 4.8). Identical for Services and Nodes apart from the `lynxType` enum.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "lynxType": {
+      "type": "string",
+      "enum": ["Service", "Node"],
+      "description": "The type of the Lynx Component. Present so a consumer can file the component before it has seen any About."
+    },
+    "connected": {
+      "type": "boolean",
+      "description": "Whether the component is connected to its broker. Set false by the Last Will."
+    }
+  },
+  "required": ["lynxType", "connected"],
+  "additionalProperties": false
+}
+```
+
+A zero-length payload is also valid on this topic and clears the retained record, removing the component from the roster.
 
 ### A.1 Service About (`@/About`)
 
@@ -1210,7 +1514,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
         "id": { "type": "string", "description": "Unique identifier of the Component." },
         "title": { "type": "string", "description": "Human-readable title." },
         "description": { "type": "string", "description": "Human-readable description." },
-        "lynx_version": { "type": "string", "enum": ["A2.1"], "description": "Lynx protocol version." },
+        "lynx_version": { "type": "string", "enum": ["A3.0"], "description": "Lynx protocol version." },
         "time_source": { "type": "string", "description": "Time source type (e.g., 'unix', 'process')." }
       }
     },
@@ -1270,7 +1574,7 @@ In the Python SDK, the `LoggingNoticeHandler` bridges Python's standard `logging
             "id": { "type": "string" },
             "title": { "type": "string" },
             "description": { "type": "string" },
-            "lynx_version": { "type": "string", "enum": ["A2.1"] }
+            "lynx_version": { "type": "string", "enum": ["A3.0"] }
           }
         },
         "config": { "type": "object" },
@@ -1343,7 +1647,7 @@ Extends the Service About schema with `services` and `childNodes`:
         "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "lynx_version": { "type": "string", "enum": ["A2.1"] },
+        "lynx_version": { "type": "string", "enum": ["A3.0"] },
         "time_source": { "type": "string" }
       }
     },
@@ -1534,6 +1838,54 @@ This is the schema for a Channel supporting every parameter defined in section 7
 }
 ```
 
+### A.8 Sync Request (`?/Sync`)
+
+*(A3.0)* An object mirroring the shape of the subtree being compared, whose values are the consumer's xxh32 digests. Nesting is arbitrary, so the schema constrains leaf types rather than structure.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Map of key to the consumer's xxh32 digest of that subtree, or to a nested map for a deeper comparison.",
+  "additionalProperties": {
+    "oneOf": [
+      { "type": "string", "pattern": "^[0-9a-f]{8}$", "description": "xxh32 digest, lowercase hex." },
+      { "type": "object", "description": "Nested comparison at this key." }
+    ]
+  }
+}
+```
+
+### A.9 Sync Reply (`@/Sync`)
+
+*(A3.0)* Empty when every supplied digest matched. Otherwise one entry per differing key, descending one level: objects and arrays are represented by their digest, scalars by their value (section 4.9).
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Incremented whenever the component's About changes. A consumer that sees this change mid-walk must discard its partial result and restart."
+    }
+  },
+  "additionalProperties": {
+    "description": "Digest of an object or array, the literal value of a scalar, or a nested map descending further.",
+    "oneOf": [
+      { "type": "string" },
+      { "type": "number" },
+      { "type": "boolean" },
+      { "type": "null" },
+      { "type": "object" }
+    ]
+  }
+}
+```
+
+A string at a position where the consumer holds an object is ambiguous between a digest and a literal value. Consumers resolve it by not resolving it: on any type mismatch, stop descending and re-fetch that subtree in full (section 4.9).
+
 ---
 
 ## Appendix B: Protocol Version History
@@ -1542,7 +1894,24 @@ This is the schema for a Channel supporting every parameter defined in section 7
 |---------|--------|-------|
 | `A1.0` | Superseded | Initial protocol version. Defined Services, Channels, Nodes, About, Notice, contents filtering, and the topic naming conventions. Stream used `interval` and `paginate`. |
 | `A2.0` | Superseded | `replyTopics` and `dataOutput` on endpoint About metadata. Stream command: `interval`/`paginate` replaced by `sampleInterval` and `batch` (`maxInterval`, `maxSamples`). Batching is a discrete, sampling-independent set of operations; empty `[]` data messages are valid. Sample timestamps are stream-relative and do not reset per batch. |
-| `A2.1` | Current | Channel interfaces are composed rather than fixed (see below). |
+| `A2.1` | Superseded | Channel interfaces are composed rather than fixed (see below). |
+| `A3.0` | Current, draft | Presence separated from description: `@/Status` is retained, `@/About` is not. `?/Sync` added. Network hierarchy made explicit in the topic structure through Node relaying. The interface freeze is withdrawn. |
+
+### A3.0 breaking changes
+
+Every change below is breaking for A2.1 consumers.
+
+**1. `@/About` is no longer retained.** A consumer can no longer learn a component's description by subscribing and waiting for a retained copy. It must read the roster from `@/Status` and then request the description (sections 4.4, 10.1). In exchange, partial About publishes became safe, which is what made the remaining changes possible.
+
+**2. `@/Status` is new and carries the Last Will.** The will moved off `@/About`, where it used to overwrite the description with `{"status":{"connected":false}}` (sections 4.8, 10.5).
+
+**3. The interface freeze is withdrawn.** A component MAY change its endpoints and schemas while connected, provided it publishes an About reflecting the change. Consumers MUST NOT assume a cached interface is current (section 4.7).
+
+**4. `contents` no longer accepts a digest string.** Hash comparison moved to `?/Sync`, which locates differences at any depth instead of answering one all-or-nothing question (sections 4.5, 4.9, 7.8).
+
+**5. `replyTopics` MUST stay within the declaring component's namespace.** A2.1 allowed entries pointing at other components. Topics are now frame-relative and a foreign topic cannot be re-rooted (sections 4.6, 4.10).
+
+**6. Topics are frame-relative.** A component publishes self-rooted and a consumer re-roots by the prefix a message arrived on. In a single-broker deployment with no Nodes, every prefix is empty and this is invisible; in a multi-layer network it is mandatory (sections 4.10, 5.4).
 
 ### A2.1 breaking changes
 
@@ -1554,4 +1923,4 @@ Three A2.0 guarantees are withdrawn. Consumers written against A2.0 may require 
 
 **3. `sampleInterval` is optional and binding.** In A2.0 `sampleInterval` was always advertised on `!/Stream` and described as a request the Channel need not honor. In A2.1 it is advertised only by Channels that support it, and advertising it obliges the Channel to honor it (section 7.5).
 
-Additions that are not breaking: user-defined Channel commands (section 7.3), the explicit one-active-command-per-Channel rule (section 7.7), the interface stability rule (section 4.7), and `additionalProperties` in published endpoint metadata (section 4.6).
+Additions that are not breaking: user-defined Channel commands (section 7.3), the explicit one-active-command-per-Channel rule (section 7.7), the interface stability rule (section 4.7, withdrawn in A3.0), and `additionalProperties` in published endpoint metadata (section 4.6).
