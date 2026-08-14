@@ -175,13 +175,6 @@ class StreamBatcher:
             if now_ns >= self._flush_deadline_ns:
                 self._flush_locked(ending=False)
 
-    def on_max_interval(self) -> None:
-        """Force a time-based flush. Kept for callers that already know they are due."""
-        with self._lock:
-            if self._ended:
-                return
-            self._flush_locked(ending=False)
-
     def end_stream(self) -> None:
         """Flush once (including [] if empty) and mark the stream ended. Idempotent."""
         on_ended: Optional[Callable[[], None]] = None

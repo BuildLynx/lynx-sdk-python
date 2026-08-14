@@ -96,9 +96,6 @@ class Component(ABC):
                 "interface was frozen (first @/About publish)."
             )
 
-    def get_status(self) -> Dict[str, Any]:
-        return self._status
-
     def get_status_dict(self) -> Dict[str, Any]:
         return copy(self._status)
 

@@ -4,51 +4,21 @@ A class to represent the current state of the network as known by a ClientCompon
 Generative AI was used in the Creation/Modification of this file.
 """
 
-
-
-# === IMPORTS ===
-
-# -stdlib Imports-
 from typing import Dict, Any, List, Tuple, FrozenSet
 
-# -Lynx Imports-
 from lynx_sdk.messaging.mqtt_client import InboundMessage
 from lynx_sdk.protocol.dicts import deep_merge
 from lynx_sdk.protocol.component_type import ComponentType
 
-# -External Imports-
-
-
-
-# === CONSTANTS ===
 
 # Top-level keys allowed on a partial About (mutable fields only).
 PARTIAL_ABOUT_KEYS: FrozenSet[str] = frozenset({"status", "config"})
 
 
-# === GLOBALS VARIABLES ===
-
-
-
-# === FUNCTIONS ===
-
-# def initial_state():
-#     """
-#     Create a recursive defaultdict of initial_state for the network state.
-#     This allows setting values at any depth like initial_state()["a"]["b"]["c"] = "d", even if none of the intermediate keys exist.
-#     Example here: https://stackoverflow.com/questions/19189274/nested-defaultdict-of-defaultdict
-#     """
-#     return defaultdict(initial_state)
-
-
-
-#  === CLASSES ===
-
 class NetworkState():
 
     def __init__(self):
         self.state: Dict[str, Any] = self.generate_empty_node_state()
-    
 
     def generate_empty_node_state(self) -> Dict[str, Any]:
         """
@@ -56,10 +26,10 @@ class NetworkState():
         """
         return {"services": {}, "childNodes": {}}
 
-
-    def recursively_set_path(self, 
-        path: List[Tuple[str, ComponentType]], 
-        state_scope: Dict[str, Any], 
+    def recursively_set_path(
+        self,
+        path: List[Tuple[str, ComponentType]],
+        state_scope: Dict[str, Any],
         final_payload: Dict[str, Any]):
         """
         Recursively checks to see if the path to insert the About payload into the state already exists, and creates
@@ -71,7 +41,7 @@ class NetworkState():
 
         Returns:
             True if any part of the path was created, False otherwise.
-        """        
+        """
         id = path[0][0]
         component_type = path[0][1]
         if component_type == ComponentType.SERVICE:
@@ -87,8 +57,7 @@ class NetworkState():
                 self.recursively_set_path(path[1:], state_scope["childNodes"][id], final_payload)
         else:
             raise ValueError(f"Invalid component type: {component_type}")
-    
-    
+
     def update_from_about_message(self, msg: InboundMessage):
         """
         Update the network state from an about message.
@@ -118,7 +87,3 @@ class NetworkState():
             raise ValueError(f"Invalid Lynx type: {lynx_type}. Payload: {msg.payload}")
         component_path_tuple_list.append((component_path_list[-1], ComponentType(lynx_type)))
         self.recursively_set_path(component_path_tuple_list, self.state, msg.payload)
-
-
-
-# === MAIN LOOP ===

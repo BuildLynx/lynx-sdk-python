@@ -4,38 +4,16 @@ MQTT Client wrapper for Lynx. Provides a unified interface for MQTT operations.
 Generative AI was used in the Creation/Modification of this file.
 """
 
-
-
-# === IMPORTS ===
-
-# -stdlib Imports-
 from dataclasses import dataclass
 from typing import Dict, Optional, Any, Callable
 
-# -Lynx Imports-
 from lynx_sdk.messaging.time_source import TimeSource
 
-# -External Imports-
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
 import orjson
 
-
-
-# === CONSTANTS ===
-
-
-
-# === GLOBALS VARIABLES ===
-
-
-
-# === FUNCTIONS ===
-
-
-
-#  === CLASSES ===
 
 @dataclass
 class InboundMessage:
@@ -279,8 +257,5 @@ class MqttClient:
             raw=bytes(message.payload),
             properties=parsed_properties
         )
-
-
-# === MAIN LOOP ===
 
 

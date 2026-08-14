@@ -231,52 +231,6 @@ CHANNEL_CMD_POLL_ENDPOINT_ARGS = {
     }
 }
 
-CHANNEL_CMD_STREAM_ENDPOINT_ARGS = {
-    "topic": "!/Stream",
-    "description": "Start streaming on the channel, emitting data when available.",
-    "reply_topics": [REPLY_TOPIC_CLIENT_ABOUT],
-    "data_output": True,
-    "payload_properties": {
-        "contents": CONTENTS_PROPERTY,
-        "sampleInterval": {
-            "title": "Sample Interval",
-            "description": "Minimum seconds between admitted samples. Samples offered sooner are discarded. 0 = admit every sample the source offers.",
-            "default": 1.0,
-            "type": "number",
-            "minimum": 0
-        },
-        "numSamples": {
-            "title": "Number of Samples",
-            "description": "Total samples to admit into batches. 0 = infinite. Counts only samples admitted after rate and contents filtering.",
-            "default": 0,
-            "type": "integer",
-            "minimum": 0
-        },
-        "batch": {
-            "title": "Batch",
-            "description": "Flush limits for the open batch. Omitted object or omitted fields use the field defaults.",
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "maxInterval": {
-                    "title": "Max Interval",
-                    "description": "Max seconds an open batch may wait before publish. 0 = no time limit (no empty keepalives).",
-                    "default": 300,
-                    "type": "number",
-                    "minimum": 0
-                },
-                "maxSamples": {
-                    "title": "Max Samples",
-                    "description": "Max samples per published message. 0 = no count limit.",
-                    "default": 1,
-                    "type": "integer",
-                    "minimum": 0
-                }
-            }
-        }
-    }
-}
-
 CHANNEL_CMD_STOP_ENDPOINT_ARGS = {
     "topic": "!/Stop",
     "description": "Stop the active command on the channel.",

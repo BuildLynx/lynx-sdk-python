@@ -5,21 +5,31 @@ Generative AI was used in the Creation/Modification of this file.
 
 Broker resolution and logger construction live in lynx_sdk.runtime. MQTT
 lifecycle and the serve loop are kept here rather than in Component.
+About/Notice endpoints, optional network-state monitoring, and the serve
+loop are owned here so Service and Node cannot drift.
 start(loop="thread") runs paho's network thread and a deadline loop;
 start(loop="pumped") connects and returns so the application can call pump().
 """
 
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import time
 
 from lynx_sdk.core.component import Component
-from lynx_sdk.messaging.mqtt_client import MqttClient
+from lynx_sdk.messaging.endpoint import InEndpoint, OutEndpoint
+from lynx_sdk.messaging.mqtt_client import InboundMessage, MqttClient
 from lynx_sdk.messaging.time_source import TimeSource, instantiate_ideal_time_source
 from lynx_sdk.protocol.component_type import ComponentType
+from lynx_sdk.protocol.contents import PayloadBuildingError, trim_payload_by_contents
+from lynx_sdk.protocol.schemas import (
+    GET_ABOUT_ENDPOINT_ARGS,
+    SUBSCRIBE_ABOUT_ENDPOINT_ARGS,
+    SYS_NOTICE_ENDPOINT_ARGS,
+)
 from lynx_sdk.runtime.broker_config import resolve_broker_socket
 from lynx_sdk.runtime.logging_setup import configure_logger
 from lynx_sdk.runtime.network_state import NetworkState
+from lynx_sdk.runtime.notice_handler import LoggingNoticeHandler
 
 import paho.mqtt.client as mqtt
 
@@ -30,15 +40,18 @@ DEADLINE_SLEEP_CAP_S: float = 0.1
 
 
 class ClientComponent(Component):
-    def __init__(self,
+    def __init__(
+        self,
         id: str,
         component_type: ComponentType,
         title: str,
         description: str,
         lynx_version: str,
+        sys_about_endpoint_args: Dict[str, Any],
         time_source: Optional[TimeSource] = None,
         logger: Optional[logging.Logger] = None,
-        track_network_state: bool = False):
+        track_network_state: bool = False,
+        publish_logs_as_notices: bool = True):
         """
         Initialize a Lynx Client Component.
         """
@@ -64,10 +77,34 @@ class ClientComponent(Component):
         self.network_state: Optional[NetworkState] = NetworkState() if track_network_state else None
         self._running: bool = False
 
+        self.sys_about_endpoint: OutEndpoint = self.new_out_endpoint(**sys_about_endpoint_args)
+        self.get_about_endpoint: InEndpoint = self.new_in_endpoint(self.about_handler, **GET_ABOUT_ENDPOINT_ARGS)
+        self.sys_notice_endpoint: OutEndpoint = self.new_out_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
+        if publish_logs_as_notices:
+            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
+        self.monitor_about_endpoint: Optional[InEndpoint] = None
+        if track_network_state:
+            assert self.network_state is not None
+            self.monitor_about_endpoint = self.new_in_endpoint(
+                self.network_state.update_from_about_message, **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
+        self.client_endpoint_topics_set.update(set(self.endpoints.keys()))
 
-    def publish_about(self) -> Dict:
-        raise NotImplementedError
+    def about_handler(self, msg: InboundMessage) -> None:
+        """Handle incoming About queries."""
+        payload = msg.payload
+        contents = payload.get("contents", True)
+        outgoing_payload = self.produce_about()
+        if contents is not True:
+            try:
+                outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)
+            except PayloadBuildingError as e:
+                self.logger.error(f"Error trimming payload: {e.message}")
+                return
+        self.sys_about_endpoint.publish(payload=outgoing_payload)
 
+    def publish_about(self) -> None:
+        """Publish the about information to the MQTT broker."""
+        self.sys_about_endpoint.publish(payload=self.produce_about())
 
     def no_endpoint_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
         """
@@ -78,7 +115,6 @@ class ClientComponent(Component):
         if not message.topic.startswith(f"{self.id}/"):
             return
         self.logger.warning(f"Received message on topic \"{message.topic}\" but no endpoint is configured to handle it.")
-
 
     def on_connect(self, client: mqtt.Client, userdata: Any, flags: Dict, reason_code: int, properties: mqtt.Properties):
         """
@@ -97,7 +133,6 @@ class ClientComponent(Component):
             self.logger.error(f"Exception in on_connect: {e}", exc_info=True)
             raise
 
-
     def on_disconnect(self, client: mqtt.Client, userdata: Any, disconnect_flags: Dict, reason_code: int, properties: mqtt.Properties):
         """
         Callback for when the client disconnects from the MQTT broker.
@@ -105,16 +140,13 @@ class ClientComponent(Component):
         self.set_status(connected=False)
         self.logger.warning(f"Disconnected from MQTT broker: reason_code={reason_code}, flags={disconnect_flags}")
 
-
     def service_deadlines(self) -> None:
         """Flush any due protocol deadlines. Services override this to pump Channels."""
         return
 
-
     def soonest_deadline_ns(self) -> Optional[int]:
         """perf_counter_ns of the next protocol deadline, or None."""
         return None
-
 
     def pump(self, timeout: float = 0.1) -> None:
         """
@@ -125,7 +157,6 @@ class ClientComponent(Component):
         """
         self.mqtt_client.loop(timeout=timeout)
         self.service_deadlines()
-
 
     def _connect_with_retry(self) -> None:
         self.mqtt_client.set_on_message(self.no_endpoint_message)
@@ -143,7 +174,6 @@ class ClientComponent(Component):
                     f"is the broker running? Waiting {CONNECT_RETRY_INTERVAL} seconds before retrying.")
                 time.sleep(CONNECT_RETRY_INTERVAL)
 
-
     def _run_deadline_loop(self) -> None:
         """Sleep until the next batch deadline (capped) and flush. MQTT runs on paho's thread."""
         self._running = True
@@ -155,7 +185,6 @@ class ClientComponent(Component):
                 remaining = (deadline - time.perf_counter_ns()) / 1_000_000_000
                 time.sleep(max(0.0, min(remaining, DEADLINE_SLEEP_CAP_S)))
             self.service_deadlines()
-
 
     def start(self, infinite_loop: bool = True, loop: str = "thread"):
         """

@@ -29,14 +29,6 @@ def sample_cpu_load(request: InboundMessage, continue_sampling: Callable):
     #TODO any exception will be caught by the Channel and published as an exception
 
 
-# def sample_temperature():
-#     # Check if the function is supported on the current system
-#     if hasattr(psutil, "sensors_temperatures"):
-#         return {"cpu_temperature": psutil.sensors_temperatures()}
-#     else:
-#         service.publish_exception("No temperature sensors found or supported on this system.")
-
-
 # -Memory-
 def sample_memory_status(request: InboundMessage, continue_sampling: Callable):
     while continue_sampling():

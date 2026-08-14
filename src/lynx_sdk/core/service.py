@@ -12,18 +12,10 @@ import time
 from lynx_sdk.core.client_component import ClientComponent
 from lynx_sdk.core.channel import Channel
 from lynx_sdk.messaging.time_source import TimeSource
-from lynx_sdk.messaging.endpoint import InEndpoint, OutEndpoint
-from lynx_sdk.messaging.mqtt_client import InboundMessage
 from lynx_sdk.protocol.component_type import ComponentType
-from lynx_sdk.protocol.schemas import \
-    GET_ABOUT_ENDPOINT_ARGS, \
-    SERVICE_SYS_ABOUT_ENDPOINT_ARGS, \
-    SYS_NOTICE_ENDPOINT_ARGS, \
-    SUBSCRIBE_ABOUT_ENDPOINT_ARGS
+from lynx_sdk.protocol.schemas import SERVICE_SYS_ABOUT_ENDPOINT_ARGS
 from lynx_sdk.protocol.capabilities import ChannelCommand
-from lynx_sdk.protocol.contents import trim_payload_by_contents, PayloadBuildingError
 from lynx_sdk.protocol.version import LYNX_VERSION
-from lynx_sdk.runtime.notice_handler import LoggingNoticeHandler
 
 
 class Service(ClientComponent):
@@ -45,23 +37,13 @@ class Service(ClientComponent):
             title=title,
             description=description,
             lynx_version=lynx_version,
+            sys_about_endpoint_args=SERVICE_SYS_ABOUT_ENDPOINT_ARGS,
             time_source=time_source,
             logger=logger,
-            track_network_state=track_network_state
-        )
+            track_network_state=track_network_state,
+            publish_logs_as_notices=publish_logs_as_notices)
 
         self.channels: Dict[str, Channel] = {}
-
-        self.sys_about_endpoint: OutEndpoint = self.new_out_endpoint(**SERVICE_SYS_ABOUT_ENDPOINT_ARGS)
-        self.get_about_endpoint: InEndpoint = self.new_in_endpoint(self.about_handler, **GET_ABOUT_ENDPOINT_ARGS)
-        self.sys_notice_endpoint: OutEndpoint = self.new_out_endpoint(**SYS_NOTICE_ENDPOINT_ARGS)
-        if publish_logs_as_notices:
-            self.logger.addHandler(LoggingNoticeHandler(endpoint=self.sys_notice_endpoint))
-
-        if track_network_state:
-            self.new_in_endpoint(self.network_state.update_from_about_message, **SUBSCRIBE_ABOUT_ENDPOINT_ARGS)
-
-        self.client_endpoint_topics_set.update(set[str](self.endpoints.keys()))
 
     def freeze_interface(self) -> None:
         super().freeze_interface()
@@ -158,21 +140,6 @@ class Service(ClientComponent):
         self.channels[channel.id] = channel
         self.client_endpoint_topics_set.update(set[str](channel.endpoints.keys()))
 
-    def about_handler(self, msg: InboundMessage):
-        """
-        Handle incoming About queries.
-        """
-        payload = msg.payload
-        contents = payload.get("contents", True)
-        outgoing_payload = self.produce_about()
-        if contents is not True:
-            try:
-                outgoing_payload = trim_payload_by_contents(self.produce_about(), contents)
-            except PayloadBuildingError as e:
-                self.logger.error(f"Error trimming payload: {e.message}")
-                return
-        self.sys_about_endpoint.publish(payload=outgoing_payload)
-
     def produce_about(self) -> Dict:
         """
         Produce a dictionary of information about the service.
@@ -195,9 +162,3 @@ class Service(ClientComponent):
                 channel.id: channel.produce_about() for channel in self.channels.values()
             }
         }
-
-    def publish_about(self):
-        """
-        Publish the about information to the MQTT broker.
-        """
-        self.sys_about_endpoint.publish(payload=self.produce_about(), qos=1, retain=True)

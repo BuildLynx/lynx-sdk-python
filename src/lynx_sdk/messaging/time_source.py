@@ -1,44 +1,22 @@
 """
-TimeSource class for Lynx. A TimeSource is the encapsulation of a single time source, it contains a function to get 
+TimeSource class for Lynx. A TimeSource is the encapsulation of a single time source, it contains a function to get
     the current time in seconds and nanoseconds according to the time source.
 
 Generative AI was used in the Creation/Modification of this file.
 """
 
-
-
-# === IMPORTS ===
-
-# -stdlib Imports-
 from typing import Callable, Dict
 import time
 from enum import Enum
 
-# -Lynx Imports-
-
-# -External Imports-
-
-
-
-# === CONSTANTS ===
-
-
-
-# === GLOBALS VARIABLES ===
 
 EPOCH_DELTA_1970_TO_2000 = 946684800   # 30 years incl leap days
 NSEC_PER_SEC = int(1e9)
 
 
-# === FUNCTIONS ===
-
-
-#  === CLASSES ===
-
 class TimeSourceType(Enum):
     PROCESS = "process"
     UNIX = "unix"
-
 
 
 class TimeSource():
@@ -52,12 +30,10 @@ class TimeSource():
         self.time_source_type: TimeSourceType = time_source_type
 
 
-
 class ProcessPerfTimeSource(TimeSource):
     def __init__(self):
         self._start_time: float = time.perf_counter_ns()
         super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.PROCESS)
-    
 
     def get_time(self) -> Dict[int, int]:
         current_time = time.perf_counter_ns()-self._start_time
@@ -65,17 +41,11 @@ class ProcessPerfTimeSource(TimeSource):
             "s": current_time // NSEC_PER_SEC,
             "ns": current_time % NSEC_PER_SEC
         }
-    
-
-    def reset_start_time(self):
-        self._start_time = time.perf_counter_ns()
-
 
 
 class UnixTimeSource(TimeSource):
     def __init__(self):
         super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.UNIX)
-    
 
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
@@ -92,7 +62,6 @@ class Epoch2000TimeSource(TimeSource):
     """
     def __init__(self):
         super().__init__(get_time_function=self.get_time, time_source_type=TimeSourceType.UNIX)
-    
 
     def get_time(self) -> Dict[int, int]:
         current_time = time.time_ns()
@@ -111,6 +80,5 @@ def instantiate_ideal_time_source() -> TimeSource:
         return UnixTimeSource()
     elif start_year == 2000:
         return Epoch2000TimeSource()
-    else: 
+    else:
         return ProcessPerfTimeSource()
-
